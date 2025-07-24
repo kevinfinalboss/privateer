@@ -7,14 +7,14 @@ import (
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Escaneia recursos procurando por imagens públicas",
-	Long:  "Escaneia clusters Kubernetes ou repositórios GitHub procurando por imagens Docker públicas",
+	Short: getMessage("scan_short"),
+	Long:  getMessage("scan_long"),
 }
 
 var scanClusterCmd = &cobra.Command{
 	Use:   "cluster",
-	Short: "Escaneia cluster Kubernetes",
-	Long:  "Escaneia cluster Kubernetes procurando por imagens Docker públicas em Deployments, StatefulSets, DaemonSets, etc.",
+	Short: getMessage("scan_cluster_short"),
+	Long:  getMessage("scan_cluster_long"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return scanCluster()
 	},
@@ -22,14 +22,21 @@ var scanClusterCmd = &cobra.Command{
 
 var scanGithubCmd = &cobra.Command{
 	Use:   "github",
-	Short: "Escaneia repositórios GitHub",
-	Long:  "Escaneia repositórios GitHub procurando por imagens Docker públicas em Dockerfiles e manifests Kubernetes",
+	Short: getMessage("scan_github_short"),
+	Long:  getMessage("scan_github_long"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return scanGithub()
 	},
 }
 
 func init() {
+	scanCmd.Short = getMessage("scan_short")
+	scanCmd.Long = getMessage("scan_long")
+	scanClusterCmd.Short = getMessage("scan_cluster_short")
+	scanClusterCmd.Long = getMessage("scan_cluster_long")
+	scanGithubCmd.Short = getMessage("scan_github_short")
+	scanGithubCmd.Long = getMessage("scan_github_long")
+
 	scanCmd.AddCommand(scanClusterCmd)
 	scanCmd.AddCommand(scanGithubCmd)
 }
