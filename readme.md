@@ -236,11 +236,11 @@ curl -u user:pass https://registry.example.com/v2/alpine/tags/list
 - [x] Detecção inteligente de imagens públicas/privadas
 - [x] Sistema de i18n (3 idiomas)
 - [x] Logs estruturados
-- [x] **Engine de migração** ✨
-- [x] **Suporte a Docker Registry** ✨
-- [x] **Suporte a Harbor** ✨
-- [x] **Processamento concorrente** ✨
-- [x] **Health checks de registry** ✨
+- [x] Engine de migração
+- [x] Suporte a Docker Registry
+- [x] Suporte a Harbor
+- [x] Processamento concorrente
+- [x] Health checks de registry
 
 ### 🚧 **v0.2.0 - Em Desenvolvimento**
 - [ ] Integração com AWS ECR
