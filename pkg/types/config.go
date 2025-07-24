@@ -4,6 +4,7 @@ type RegistryConfig struct {
 	Name      string   `yaml:"name"`
 	Type      string   `yaml:"type"`
 	Enabled   bool     `yaml:"enabled"`
+	Priority  int      `yaml:"priority"`
 	URL       string   `yaml:"url,omitempty"`
 	Username  string   `yaml:"username,omitempty"`
 	Password  string   `yaml:"password,omitempty"`
@@ -27,11 +28,23 @@ type GitHubConfig struct {
 	Repositories []string `yaml:"repositories"`
 }
 
+type WebhookConfig struct {
+	Discord DiscordWebhookConfig `yaml:"discord"`
+}
+
+type DiscordWebhookConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`
+	Avatar  string `yaml:"avatar,omitempty"`
+	Name    string `yaml:"name,omitempty"`
+}
+
 type SettingsConfig struct {
-	Language    string `yaml:"language"`
-	LogLevel    string `yaml:"log_level"`
-	DryRun      bool   `yaml:"dry_run"`
-	Concurrency int    `yaml:"concurrency"`
+	Language           string `yaml:"language"`
+	LogLevel           string `yaml:"log_level"`
+	DryRun             bool   `yaml:"dry_run"`
+	Concurrency        int    `yaml:"concurrency"`
+	MultipleRegistries bool   `yaml:"multiple_registries"`
 }
 
 type ImageDetectionConfig struct {
@@ -46,4 +59,24 @@ type Config struct {
 	GitHub         GitHubConfig         `yaml:"github"`
 	Settings       SettingsConfig       `yaml:"settings"`
 	ImageDetection ImageDetectionConfig `yaml:"image_detection"`
+	Webhooks       WebhookConfig        `yaml:"webhooks"`
+}
+
+type MigrationResult struct {
+	Image       *ImageInfo
+	TargetImage string
+	Registry    string
+	Success     bool
+	Error       error
+	Skipped     bool
+	Reason      string
+}
+
+type MigrationSummary struct {
+	TotalImages  int
+	SuccessCount int
+	FailureCount int
+	SkippedCount int
+	Results      []*MigrationResult
+	Errors       []error
 }
