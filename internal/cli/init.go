@@ -51,6 +51,7 @@ registries:
   # Registry Docker simples (como registry:2 no Kubernetes)
   - name: "my-docker-registry"
     type: "docker"
+    enabled: true  # true para enviar imagens, false para ignorar
     url: "https://registry.example.com"  # Inclua https:// ou http://
     username: "admin"
     password: "password123"
@@ -59,23 +60,48 @@ registries:
   # Harbor registry (auto-hosted)
   - name: "harbor-prod"
     type: "harbor"
+    enabled: false  # Desabilitado por padrão
     url: "https://harbor.company.com"  # Inclua https:// ou http://
     username: "admin"
     password: "Harbor12345"
     project: "library"  # Projeto padrão do Harbor
     insecure: false
     
-  # AWS ECR (ainda não implementado - v0.2.0)
-  # - name: "ecr-prod"
-  #   type: "ecr"
-  #   region: "us-east-1"
-  #   # Usa credenciais AWS do ambiente
+  # AWS ECR - Opção 1: Usando credenciais diretas
+  - name: "ecr-prod-credentials"
+    type: "ecr"
+    enabled: false  # Habilite conforme necessário
+    region: "us-east-1"
+    account_id: "123456789012"  # Opcional - será descoberto automaticamente
+    access_key: "AKIAIOSFODNN7EXAMPLE"
+    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     
-  # GitHub Container Registry (ainda não implementado - v0.2.0)  
-  # - name: "ghcr-company"
-  #   type: "ghcr"
-  #   username: "your-github-user"
-  #   password: "ghp_your_github_token"
+  # AWS ECR - Opção 2: Usando profiles AWS
+  - name: "ecr-prod-profiles"
+    type: "ecr"
+    enabled: false  # Habilite conforme necessário
+    region: "us-east-1"
+    account_id: "123456789012"  # Obrigatório se usando múltiplos profiles
+    profiles:  # Lista de profiles para tentar em ordem
+      - "production"
+      - "default"
+      - "company-aws"
+    
+  # AWS ECR - Opção 3: Credenciais padrão do ambiente
+  - name: "ecr-prod-default"
+    type: "ecr"
+    enabled: false  # Habilite conforme necessário
+    region: "us-east-1"
+    # account_id será descoberto automaticamente
+    # Usa credenciais do ambiente: ~/.aws/credentials, IAM roles, etc.
+    
+  # GitHub Container Registry
+  - name: "ghcr-company"
+    type: "ghcr"
+    enabled: false  # Ainda não implementado totalmente
+    username: "your-github-user"
+    password: "ghp_your_github_token"
+    project: "your-organization"  # Nome da organização
 
 # Configuração do Kubernetes
 kubernetes:
@@ -84,7 +110,7 @@ kubernetes:
   # Exemplo:
   # namespaces:
   #   - "default"
-  #   - "production"
+  #   - "production" 
   #   - "staging"
 
 # Configuração do GitHub (futuro - v0.3.0)
@@ -163,6 +189,42 @@ image_detection:
 # - qualquer.dominio.com/* (registries com domínio customizado)
 #
 # Use as configurações custom_* acima para sobrescrever a detecção automática.
+
+# 🚀 AWS ECR - Configuração Avançada:
+#
+# O Privateer suporta 3 formas de autenticação com AWS ECR:
+#
+# 1. CREDENCIAIS DIRETAS (menos seguro, só para testes):
+#    - access_key e secret_key diretamente no config
+#
+# 2. PROFILES AWS (recomendado):
+#    - Configure múltiplos profiles em ~/.aws/credentials
+#    - O Privateer tenta cada profile em ordem até encontrar um válido
+#    - Útil para organizações com múltiplas contas AWS
+#
+# 3. CREDENCIAIS PADRÃO (mais seguro):
+#    - IAM Roles (para EC2/ECS/Lambda)
+#    - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+#    - ~/.aws/credentials com profile [default]
+#
+# ACCOUNT_ID:
+# - Obrigatório apenas se você tem múltiplos profiles para contas diferentes
+# - O Privateer filtra automaticamente qual profile usar baseado no account_id
+# - Se não fornecido, será descoberto automaticamente via STS GetCallerIdentity
+
+# ⚠️  VALIDAÇÃO DE DUPLICATAS:
+#
+# O Privateer verifica automaticamente se uma imagem já existe no registry
+# de destino antes de fazer a migração. Se encontrar duplicata:
+# - ALERTA no log
+# - PULA a migração dessa imagem para esse registry
+# - CONTINUA com outros registries habilitados
+# - NÃO FALHA a operação geral
+#
+# Isso evita:
+# - Sobrescrever imagens existentes acidentalmente
+# - Desperdiçar tempo/banda fazendo upload desnecessário
+# - Conflitos de versioning
 `
 
 	if _, err := os.Stat(configFile); err == nil {
@@ -187,7 +249,10 @@ image_detection:
 		Str("message", "2. Configure seus registries de destino").
 		Send()
 	log.Info("config_next_steps").
-		Str("message", "3. Execute: privateer scan cluster --dry-run").
+		Str("message", "3. Habilite os registries (enabled: true)").
+		Send()
+	log.Info("config_next_steps").
+		Str("message", "4. Execute: privateer scan cluster --dry-run").
 		Send()
 	log.Info("operation_completed").Str("operation", "init").Send()
 
