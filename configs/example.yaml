@@ -1,0 +1,43 @@
+registries:
+  - name: "ecr-prod"
+    type: "ecr"
+    region: "us-east-1"
+    
+  - name: "harbor-main"
+    type: "harbor"
+    url: "harbor.company.com"
+
+kubernetes:
+  context: "production"
+  namespaces: ["default", "production", "staging"]
+
+github:
+  token: "ghp_xxxxxxxxxxxxxxxx"
+  organization: "mycompany"
+  repositories: ["app1", "app2"]
+
+settings:
+  language: "pt-BR"
+  log_level: "info"
+  dry_run: false
+
+image_detection:
+  custom_public_registries:
+    - "quay.io/prometheus"
+    - "docker.io/library"
+    - "registry.opensource.zalan.do"
+    - "k8s.gcr.io"
+    - "registry.k8s.io"
+    - "public.ecr.aws"
+    - "mcr.microsoft.com"
+    
+  custom_private_registries:
+    - "mycompany.azurecr.io"
+    - "ghcr.io/mycompany"
+    - "harbor.mycompany.com"
+    - "docker.io/mycompany"
+    
+  ignore_registries:
+    - "localhost"
+    - "127.0.0.1"
+    - "registry.local"
