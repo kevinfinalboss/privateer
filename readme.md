@@ -1,6 +1,6 @@
 # 🏴‍☠️ Privateer
 
-![Privateer Logo](.github/images/privateer-logo.png)
+<img src=".github/images/privateer-logo.png" alt="Privateer Logo" width="200"/>
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
