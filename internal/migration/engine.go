@@ -3,11 +3,13 @@ package migration
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/kevinfinalboss/privateer/internal/logger"
 	"github.com/kevinfinalboss/privateer/internal/registry"
+	"github.com/kevinfinalboss/privateer/internal/webhook"
 	"github.com/kevinfinalboss/privateer/pkg/types"
 )
 
@@ -16,25 +18,7 @@ type Engine struct {
 	logger          *logger.Logger
 	config          *types.Config
 	concurrency     int
-}
-
-type MigrationResult struct {
-	Image       *types.ImageInfo
-	TargetImage string
-	Registry    string
-	Success     bool
-	Error       error
-	Skipped     bool
-	Reason      string
-}
-
-type MigrationSummary struct {
-	TotalImages  int
-	SuccessCount int
-	FailureCount int
-	SkippedCount int
-	Results      []*MigrationResult
-	Errors       []error
+	discordWebhook  *webhook.DiscordWebhook
 }
 
 func NewEngine(registryManager *registry.Manager, logger *logger.Logger, cfg *types.Config) *Engine {
@@ -43,41 +27,72 @@ func NewEngine(registryManager *registry.Manager, logger *logger.Logger, cfg *ty
 		concurrency = cfg.Settings.Concurrency
 	}
 
-	return &Engine{
+	engine := &Engine{
 		registryManager: registryManager,
 		logger:          logger,
 		config:          cfg,
 		concurrency:     concurrency,
 	}
-}
 
-func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (*MigrationSummary, error) {
-	if len(images) == 0 {
-		e.logger.Info("no_images_to_migrate").Send()
-		return &MigrationSummary{}, nil
+	if cfg.Webhooks.Discord.Enabled && cfg.Webhooks.Discord.URL != "" {
+		engine.discordWebhook = webhook.NewDiscordWebhook(cfg.Webhooks.Discord, logger)
+		logger.Info("discord_webhook_enabled").
+			Str("url", maskWebhookURL(cfg.Webhooks.Discord.URL)).
+			Send()
 	}
 
-	enabledRegistries := e.getEnabledRegistries()
-	if len(enabledRegistries) == 0 {
+	return engine
+}
+
+func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (*types.MigrationSummary, error) {
+	if len(images) == 0 {
+		e.logger.Info("no_images_to_migrate").Send()
+		return &types.MigrationSummary{}, nil
+	}
+
+	targetRegistries := e.selectTargetRegistries()
+	if len(targetRegistries) == 0 {
 		err := fmt.Errorf("nenhum registry habilitado encontrado")
 		e.logger.Error("no_enabled_registries").Send()
+
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, err.Error(), "Seleção de Registries")
+		}
+
 		return nil, err
 	}
 
 	e.logger.Info("migration_started").
 		Int("total_images", len(images)).
-		Int("enabled_registries", len(enabledRegistries)).
-		Strs("registries", enabledRegistries).
+		Int("target_registries", len(targetRegistries)).
+		Strs("registries", getRegistryNames(targetRegistries)).
+		Bool("multiple_registries", e.config.Settings.MultipleRegistries).
 		Int("concurrency", e.concurrency).
 		Send()
 
-	if e.config.Settings.DryRun {
-		return e.dryRunMigration(images, enabledRegistries), nil
+	if e.discordWebhook != nil {
+		err := e.discordWebhook.SendMigrationStart(ctx, len(images), getRegistryNames(targetRegistries), e.config.Settings.DryRun)
+		if err != nil {
+			e.logger.Warn("discord_webhook_failed").Err(err).Send()
+		}
 	}
 
-	summary := &MigrationSummary{
+	if e.config.Settings.DryRun {
+		summary := e.dryRunMigration(images, targetRegistries)
+
+		if e.discordWebhook != nil {
+			err := e.discordWebhook.SendMigrationComplete(ctx, summary, true)
+			if err != nil {
+				e.logger.Warn("discord_webhook_failed").Err(err).Send()
+			}
+		}
+
+		return summary, nil
+	}
+
+	summary := &types.MigrationSummary{
 		TotalImages: len(images),
-		Results:     make([]*MigrationResult, 0, len(images)*len(enabledRegistries)),
+		Results:     make([]*types.MigrationResult, 0),
 	}
 
 	semaphore := make(chan struct{}, e.concurrency)
@@ -85,30 +100,38 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 	var mu sync.Mutex
 
 	for _, image := range images {
-		for _, registryName := range enabledRegistries {
+		if e.config.Settings.MultipleRegistries {
+			for _, regConfig := range targetRegistries {
+				wg.Add(1)
+				go func(img *types.ImageInfo, regCfg types.RegistryConfig) {
+					defer wg.Done()
+
+					semaphore <- struct{}{}
+					defer func() { <-semaphore }()
+
+					result := e.migrateImageToRegistry(ctx, img, regCfg.Name)
+
+					mu.Lock()
+					summary.Results = append(summary.Results, result)
+					e.updateSummaryCounters(summary, result)
+					mu.Unlock()
+				}(image, regConfig)
+			}
+		} else {
 			wg.Add(1)
-			go func(img *types.ImageInfo, regName string) {
+			go func(img *types.ImageInfo) {
 				defer wg.Done()
 
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
 
-				result := e.migrateImageToRegistry(ctx, img, regName)
+				result := e.migrateImageToRegistry(ctx, img, targetRegistries[0].Name)
 
 				mu.Lock()
 				summary.Results = append(summary.Results, result)
-				if result.Success {
-					summary.SuccessCount++
-				} else if result.Skipped {
-					summary.SkippedCount++
-				} else {
-					summary.FailureCount++
-					if result.Error != nil {
-						summary.Errors = append(summary.Errors, result.Error)
-					}
-				}
+				e.updateSummaryCounters(summary, result)
 				mu.Unlock()
-			}(image, registryName)
+			}(image)
 		}
 	}
 
@@ -121,10 +144,17 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 		Int("skipped", summary.SkippedCount).
 		Send()
 
+	if e.discordWebhook != nil {
+		err := e.discordWebhook.SendMigrationComplete(ctx, summary, false)
+		if err != nil {
+			e.logger.Warn("discord_webhook_failed").Err(err).Send()
+		}
+	}
+
 	return summary, nil
 }
 
-func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageInfo, registryName string) *MigrationResult {
+func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageInfo, registryName string) *types.MigrationResult {
 	e.logger.Debug("migrating_image_to_registry").
 		Str("image", image.Image).
 		Str("registry", registryName).
@@ -138,7 +168,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 			Str("registry", registryName).
 			Err(err).
 			Send()
-		return &MigrationResult{
+		return &types.MigrationResult{
 			Image:    image,
 			Registry: registryName,
 			Success:  false,
@@ -154,7 +184,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 			Str("registry", registryName).
 			Err(err).
 			Send()
-		return &MigrationResult{
+		return &types.MigrationResult{
 			Image:       image,
 			TargetImage: targetImage,
 			Registry:    registryName,
@@ -170,7 +200,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 			Str("registry", registryName).
 			Err(err).
 			Send()
-		return &MigrationResult{
+		return &types.MigrationResult{
 			Image:    image,
 			Registry: registryName,
 			Success:  false,
@@ -185,7 +215,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 			Str("registry", registryName).
 			Err(err).
 			Send()
-		return &MigrationResult{
+		return &types.MigrationResult{
 			Image:       image,
 			TargetImage: targetImage,
 			Registry:    registryName,
@@ -200,7 +230,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		Str("registry", registryName).
 		Send()
 
-	return &MigrationResult{
+	return &types.MigrationResult{
 		Image:       image,
 		TargetImage: targetImage,
 		Registry:    registryName,
@@ -208,16 +238,49 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 	}
 }
 
-func (e *Engine) getEnabledRegistries() []string {
-	var enabledRegistries []string
+func (e *Engine) selectTargetRegistries() []types.RegistryConfig {
+	var enabledRegistries []types.RegistryConfig
 
 	for _, regConfig := range e.config.Registries {
 		if regConfig.Enabled {
-			enabledRegistries = append(enabledRegistries, regConfig.Name)
+			enabledRegistries = append(enabledRegistries, regConfig)
 		}
 	}
 
-	return enabledRegistries
+	if len(enabledRegistries) == 0 {
+		return []types.RegistryConfig{}
+	}
+
+	sort.Slice(enabledRegistries, func(i, j int) bool {
+		return enabledRegistries[i].Priority > enabledRegistries[j].Priority
+	})
+
+	if e.config.Settings.MultipleRegistries {
+		e.logger.Info("multiple_registries_mode").
+			Int("count", len(enabledRegistries)).
+			Send()
+		return enabledRegistries
+	}
+
+	e.logger.Info("single_registry_mode").
+		Str("selected", enabledRegistries[0].Name).
+		Int("priority", enabledRegistries[0].Priority).
+		Send()
+
+	return []types.RegistryConfig{enabledRegistries[0]}
+}
+
+func (e *Engine) updateSummaryCounters(summary *types.MigrationSummary, result *types.MigrationResult) {
+	if result.Success {
+		summary.SuccessCount++
+	} else if result.Skipped {
+		summary.SkippedCount++
+	} else {
+		summary.FailureCount++
+		if result.Error != nil {
+			summary.Errors = append(summary.Errors, result.Error)
+		}
+	}
 }
 
 func (e *Engine) generateTargetImageName(image *types.ImageInfo, reg registry.Registry) string {
@@ -292,25 +355,58 @@ func (e *Engine) getGHCROrganization(registryName string) string {
 	return "unknown"
 }
 
-func (e *Engine) dryRunMigration(images []*types.ImageInfo, enabledRegistries []string) *MigrationSummary {
+func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []types.RegistryConfig) *types.MigrationSummary {
 	e.logger.Info("dry_run_migration").
 		Int("total_images", len(images)).
-		Int("enabled_registries", len(enabledRegistries)).
+		Int("target_registries", len(targetRegistries)).
 		Send()
 
-	totalOperations := len(images) * len(enabledRegistries)
-	summary := &MigrationSummary{
+	var totalOperations int
+	if e.config.Settings.MultipleRegistries {
+		totalOperations = len(images) * len(targetRegistries)
+	} else {
+		totalOperations = len(images)
+	}
+
+	summary := &types.MigrationSummary{
 		TotalImages:  len(images),
 		SuccessCount: totalOperations,
-		Results:      make([]*MigrationResult, 0, totalOperations),
+		Results:      make([]*types.MigrationResult, 0, totalOperations),
 	}
 
 	for _, image := range images {
-		for _, registryName := range enabledRegistries {
-			reg, err := e.registryManager.GetRegistry(registryName)
+		if e.config.Settings.MultipleRegistries {
+			for _, regConfig := range targetRegistries {
+				reg, err := e.registryManager.GetRegistry(regConfig.Name)
+				if err != nil {
+					e.logger.Error("registry_not_found_dry_run").
+						Str("registry", regConfig.Name).
+						Err(err).
+						Send()
+					continue
+				}
+
+				targetImage := e.generateTargetImageName(image, reg)
+
+				e.logger.Info("dry_run_would_migrate").
+					Str("source", image.Image).
+					Str("target", targetImage).
+					Str("registry", regConfig.Name).
+					Int("priority", regConfig.Priority).
+					Send()
+
+				summary.Results = append(summary.Results, &types.MigrationResult{
+					Image:       image,
+					TargetImage: targetImage,
+					Registry:    regConfig.Name,
+					Success:     true,
+				})
+			}
+		} else {
+			reg, err := e.registryManager.GetRegistry(targetRegistries[0].Name)
 			if err != nil {
 				e.logger.Error("registry_not_found_dry_run").
-					Str("registry", registryName).
+					Str("registry", targetRegistries[0].Name).
 					Err(err).
 					Send()
 				continue
@@ -321,17 +417,34 @@ func (e *Engine) dryRunMigration(images []*types.ImageInfo, enabledRegistries []
 			e.logger.Info("dry_run_would_migrate").
 				Str("source", image.Image).
 				Str("target", targetImage).
-				Str("registry", registryName).
+				Str("registry", targetRegistries[0].Name).
+				Int("priority", targetRegistries[0].Priority).
+				Str("mode", "highest_priority_only").
 				Send()
 
-			summary.Results = append(summary.Results, &MigrationResult{
+			summary.Results = append(summary.Results, &types.MigrationResult{
 				Image:       image,
 				TargetImage: targetImage,
-				Registry:    registryName,
+				Registry:    targetRegistries[0].Name,
 				Success:     true,
 			})
 		}
 	}
 
 	return summary
+}
+
+func getRegistryNames(registries []types.RegistryConfig) []string {
+	names := make([]string, len(registries))
+	for i, reg := range registries {
+		names[i] = fmt.Sprintf("%s (priority: %d)", reg.Name, reg.Priority)
+	}
+	return names
+}
+
+func maskWebhookURL(url string) string {
+	if len(url) < 20 {
+		return "***"
+	}
+	return url[:20] + "***"
 }
