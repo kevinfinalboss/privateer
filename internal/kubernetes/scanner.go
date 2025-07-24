@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/kevinfinalboss/privateer/internal/config"
 	"github.com/kevinfinalboss/privateer/internal/logger"
 	"github.com/kevinfinalboss/privateer/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,10 +12,10 @@ import (
 type Scanner struct {
 	client *Client
 	logger *logger.Logger
-	config *config.Config
+	config *types.Config
 }
 
-func NewScanner(client *Client, log *logger.Logger, cfg *config.Config) *Scanner {
+func NewScanner(client *Client, log *logger.Logger, cfg *types.Config) *Scanner {
 	return &Scanner{
 		client: client,
 		logger: log,
