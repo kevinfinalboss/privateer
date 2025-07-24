@@ -10,17 +10,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 
-	"github.com/kevinfinalboss/privateer/internal/config"
 	"github.com/kevinfinalboss/privateer/internal/logger"
+	"github.com/kevinfinalboss/privateer/pkg/types"
 )
 
 type Client struct {
 	clientset *kubernetes.Clientset
-	config    *config.Config
+	config    *types.Config
 	logger    *logger.Logger
 }
 
-func NewClient(cfg *config.Config, log *logger.Logger) (*Client, error) {
+func NewClient(cfg *types.Config, log *logger.Logger) (*Client, error) {
 	log.Info("connecting_k8s").Send()
 
 	kubeconfig := getKubeconfigPath()
