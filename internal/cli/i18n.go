@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/kevinfinalboss/privateer/internal/config"
 	"github.com/kevinfinalboss/privateer/internal/logger"
+	"github.com/kevinfinalboss/privateer/pkg/types"
 )
 
 var i18n *logger.Logger
@@ -15,8 +16,8 @@ func initI18n() {
 		}
 	}
 
-	defaultCfg := &config.Config{
-		Settings: config.Settings{
+	defaultCfg := &types.Config{
+		Settings: types.SettingsConfig{
 			Language: getLanguageFromFlags(),
 			LogLevel: "info",
 		},
