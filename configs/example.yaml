@@ -1,42 +1,76 @@
+# Configuração dos registries de destino
 registries:
+  # Registry Docker simples (como registry:2)
+  - name: "my-docker-registry"
+    type: "docker"
+    url: "registry.kevindev.com.br"
+    username: "kgomes-adm"
+    password: "cnKR0[02Pk%^"
+    insecure: false
+    
+  # Harbor registry
+  - name: "harbor-prod"
+    type: "harbor"
+    url: "harbor.company.com"
+    username: "admin"
+    password: "Harbor12345"
+    project: "library"
+    insecure: false
+    
+  # AWS ECR (ainda não implementado)
   - name: "ecr-prod"
     type: "ecr"
     region: "us-east-1"
     
-  - name: "harbor-main"
-    type: "harbor"
-    url: "harbor.company.com"
+  # GitHub Container Registry (ainda não implementado)
+  - name: "ghcr-company"
+    type: "ghcr"
+    username: "mycompany"
+    password: "ghp_token_here"
 
+# Configuração do Kubernetes
 kubernetes:
-  context: "production"
-  namespaces: ["default", "production", "staging"]
+  context: "production"  # Deixe vazio para usar o contexto atual
+  namespaces: 
+    - "default"
+    - "production"
+    - "staging"
+  # Deixe vazio para escanear todos os namespaces
 
+# Configuração do GitHub (futuro)
 github:
   token: "ghp_xxxxxxxxxxxxxxxx"
   organization: "mycompany"
-  repositories: ["app1", "app2"]
+  repositories: 
+    - "app1"
+    - "app2"
+  # Deixe vazio para todos os repositórios
 
+# Configurações gerais
 settings:
-  language: "pt-BR"
-  log_level: "info"
-  dry_run: false
+  language: "pt-BR"  # pt-BR, en-US, es-ES
+  log_level: "info"  # debug, info, warn, error
+  dry_run: false     # true para apenas simular
+  concurrency: 3     # Número de migrações simultâneas
 
+# Configuração avançada para detecção de imagens
 image_detection:
+  # Registries que você considera públicos (além dos padrões)
   custom_public_registries:
     - "quay.io/prometheus"
-    - "docker.io/library"
-    - "registry.opensource.zalan.do"
-    - "k8s.gcr.io"
     - "registry.k8s.io"
     - "public.ecr.aws"
+    - "docker.io/library"
     - "mcr.microsoft.com"
     
+  # Registries que você considera privados
   custom_private_registries:
     - "mycompany.azurecr.io"
     - "ghcr.io/mycompany"
     - "harbor.mycompany.com"
-    - "docker.io/mycompany"
+    - "registry.kevindev.com.br"
     
+  # Registries para ignorar completamente
   ignore_registries:
     - "localhost"
     - "127.0.0.1"
