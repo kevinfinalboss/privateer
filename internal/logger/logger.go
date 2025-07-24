@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevinfinalboss/privateer/internal/config"
+	"github.com/kevinfinalboss/privateer/pkg/types"
 	"github.com/rs/zerolog"
 )
 
@@ -40,7 +40,7 @@ func New() *Logger {
 	return l
 }
 
-func NewWithConfig(cfg *config.Config) *Logger {
+func NewWithConfig(cfg *types.Config) *Logger {
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
