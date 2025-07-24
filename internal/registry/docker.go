@@ -201,3 +201,48 @@ func (r *DockerRegistry) IsHealthy(ctx context.Context) error {
 
 	return nil
 }
+
+func (r *DockerRegistry) HasImage(ctx context.Context, imageName string) (bool, error) {
+	var url string
+	parts := strings.Split(imageName, "/")
+	if len(parts) < 2 {
+		return false, fmt.Errorf("formato de imagem inválido: %s", imageName)
+	}
+
+	repositoryName := strings.Join(parts[1:], "/")
+	if strings.Contains(repositoryName, ":") {
+		repositoryName = strings.Split(repositoryName, ":")[0]
+	}
+
+	imageTag := "latest"
+	if strings.Contains(imageName, ":") {
+		imageTag = strings.Split(imageName, ":")[1]
+	}
+
+	if strings.HasPrefix(r.URL, "http://") || strings.HasPrefix(r.URL, "https://") {
+		url = fmt.Sprintf("%s/v2/%s/manifests/%s", r.URL, repositoryName, imageTag)
+	} else {
+		if r.Insecure {
+			url = fmt.Sprintf("http://%s/v2/%s/manifests/%s", r.URL, repositoryName, imageTag)
+		} else {
+			url = fmt.Sprintf("https://%s/v2/%s/manifests/%s", r.URL, repositoryName, imageTag)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	if err != nil {
+		return false, err
+	}
+
+	if r.Username != "" && r.Password != "" {
+		req.SetBasicAuth(r.Username, r.Password)
+	}
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK, nil
+}
