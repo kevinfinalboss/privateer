@@ -22,7 +22,6 @@ var rootCmd = &cobra.Command{
 	Short: getMessage("root_short"),
 	Long:  getMessage("root_long"),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// O comando init tem seu próprio PreRunE
 		if cmd.Name() == "init" {
 			return nil
 		}
