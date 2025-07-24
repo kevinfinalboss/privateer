@@ -19,10 +19,14 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "privateer",
-	Short: "Migra imagens Docker públicas para registries privados",
-	Long: `Privateer é uma ferramenta que escaneia clusters Kubernetes e repositórios GitHub
-para encontrar imagens Docker públicas e migrá-las para registries privados.`,
+	Short: getMessage("root_short"),
+	Long:  getMessage("root_long"),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// O comando init tem seu próprio PreRunE
+		if cmd.Name() == "init" {
+			return nil
+		}
+
 		var err error
 
 		cfg, err = config.Load(cfgFile)
@@ -67,10 +71,15 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "arquivo de configuração (padrão: ~/.privateer/config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&language, "language", "", "idioma dos logs (pt-BR, en-US, es-ES)")
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "nível de log (debug, info, warn, error)")
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "executar sem fazer alterações")
+	initI18n()
+
+	rootCmd.Short = getMessage("root_short")
+	rootCmd.Long = getMessage("root_long")
+
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", getMessage("flag_config"))
+	rootCmd.PersistentFlags().StringVar(&language, "language", "", getMessage("flag_language"))
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", getMessage("flag_log_level"))
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, getMessage("flag_dry_run"))
 
 	addSubcommands()
 }
