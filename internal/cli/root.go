@@ -29,12 +29,11 @@ var rootCmd = &cobra.Command{
 		var err error
 
 		cfg, err = config.Load(cfgFile)
-		if err != nil && cfgFile != "" {
-			return fmt.Errorf("erro ao carregar configuração: %w", err)
-		}
-
-		if cfg == nil {
-			cfg = &config.Config{}
+		if err != nil {
+			if cfgFile != "" {
+				return fmt.Errorf("erro ao carregar configuração: %w", err)
+			}
+			cfg = config.GetDefaultConfig()
 		}
 
 		if language != "" {
@@ -49,10 +48,12 @@ var rootCmd = &cobra.Command{
 
 		log = logger.NewWithConfig(cfg)
 
-		if cfgFile == "" {
+		if err != nil && cfgFile == "" {
 			log.Warn("config_not_found").Send()
-		} else {
+		} else if cfgFile != "" {
 			log.Info("config_loaded").Str("file", cfgFile).Send()
+		} else {
+			log.Info("config_loaded").Str("file", "~/.privateer/config.yaml").Send()
 		}
 
 		log.Info("app_started").
