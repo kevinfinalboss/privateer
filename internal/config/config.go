@@ -4,91 +4,96 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kevinfinalboss/privateer/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
-type Config struct {
-	Registries     []Registry     `yaml:"registries"`
-	Kubernetes     Kubernetes     `yaml:"kubernetes"`
-	GitHub         GitHub         `yaml:"github"`
-	Settings       Settings       `yaml:"settings"`
-	ImageDetection ImageDetection `yaml:"image_detection"`
-}
-
-type Registry struct {
-	Name   string `yaml:"name"`
-	Type   string `yaml:"type"`
-	Region string `yaml:"region,omitempty"`
-	URL    string `yaml:"url,omitempty"`
-}
-
-type Kubernetes struct {
-	Context    string   `yaml:"context"`
-	Namespaces []string `yaml:"namespaces,omitempty"`
-}
-
-type GitHub struct {
-	Token        string   `yaml:"token"`
-	Organization string   `yaml:"organization"`
-	Repositories []string `yaml:"repositories,omitempty"`
-}
-
-type Settings struct {
-	Language string `yaml:"language"`
-	LogLevel string `yaml:"log_level"`
-	DryRun   bool   `yaml:"dry_run"`
-}
-
-type ImageDetection struct {
-	CustomPublicRegistries  []string `yaml:"custom_public_registries"`
-	CustomPrivateRegistries []string `yaml:"custom_private_registries"`
-	IgnoreRegistries        []string `yaml:"ignore_registries"`
-}
-
-func Load(path string) (*Config, error) {
-	if path == "" {
-		path = getDefaultConfigPath()
+func Load(configFile string) (*types.Config, error) {
+	if configFile == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		configFile = filepath.Join(home, ".privateer", "config.yaml")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return GetDefaultConfig(), nil
+		}
 		return nil, err
 	}
 
-	var config Config
+	var config types.Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 
+	applyDefaults(&config)
+	return &config, nil
+}
+
+func GetDefaultConfig() *types.Config {
+	config := &types.Config{
+		Registries: []types.RegistryConfig{},
+		Kubernetes: types.KubernetesConfig{
+			Context:    "",
+			Namespaces: []string{},
+		},
+		GitHub: types.GitHubConfig{
+			Token:        "",
+			Organization: "",
+			Repositories: []string{},
+		},
+		Settings: types.SettingsConfig{
+			Language:    "pt-BR",
+			LogLevel:    "info",
+			DryRun:      false,
+			Concurrency: 3,
+		},
+		ImageDetection: types.ImageDetectionConfig{
+			CustomPublicRegistries:  []string{},
+			CustomPrivateRegistries: []string{},
+			IgnoreRegistries:        []string{"localhost", "127.0.0.1"},
+		},
+	}
+
+	return config
+}
+
+func applyDefaults(config *types.Config) {
 	if config.Settings.Language == "" {
 		config.Settings.Language = "pt-BR"
 	}
 	if config.Settings.LogLevel == "" {
 		config.Settings.LogLevel = "info"
 	}
-
-	return &config, nil
-}
-
-func getDefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".privateer", "config.yaml")
-}
-
-func GetDefaultConfig() *Config {
-	return &Config{
-		Settings: Settings{
-			Language: "pt-BR",
-			LogLevel: "info",
-			DryRun:   false,
-		},
-		Kubernetes: Kubernetes{
-			Context: "",
-		},
-		ImageDetection: ImageDetection{
-			CustomPublicRegistries:  []string{},
-			CustomPrivateRegistries: []string{},
-			IgnoreRegistries:        []string{},
-		},
+	if config.Settings.Concurrency == 0 {
+		config.Settings.Concurrency = 3
 	}
+	if len(config.ImageDetection.IgnoreRegistries) == 0 {
+		config.ImageDetection.IgnoreRegistries = []string{"localhost", "127.0.0.1"}
+	}
+}
+
+func Save(config *types.Config, configFile string) error {
+	if configFile == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		configDir := filepath.Join(home, ".privateer")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return err
+		}
+		configFile = filepath.Join(configDir, "config.yaml")
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(configFile, data, 0644)
 }
