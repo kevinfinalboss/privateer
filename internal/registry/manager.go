@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/kevinfinalboss/privateer/internal/logger"
@@ -19,6 +20,7 @@ type Registry interface {
 	GetType() string
 	GetName() string
 	IsHealthy(ctx context.Context) error
+	HasImage(ctx context.Context, imageName string) (bool, error)
 }
 
 type BaseRegistry struct {
@@ -39,11 +41,10 @@ func (r *BaseRegistry) GetName() string {
 	return r.Name
 }
 
-type RegistryConfig = types.RegistryConfig
-
 type Manager struct {
 	registries map[string]Registry
 	logger     *logger.Logger
+	mutex      sync.RWMutex
 }
 
 func NewManager(logger *logger.Logger) *Manager {
@@ -54,6 +55,16 @@ func NewManager(logger *logger.Logger) *Manager {
 }
 
 func (m *Manager) AddRegistry(config *types.RegistryConfig) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if !config.Enabled {
+		m.logger.Debug("registry_disabled").
+			Str("name", config.Name).
+			Send()
+		return nil
+	}
+
 	var registry Registry
 	var err error
 
@@ -75,6 +86,7 @@ func (m *Manager) AddRegistry(config *types.RegistryConfig) error {
 	}
 
 	m.registries[config.Name] = registry
+
 	m.logger.Info("registry_added").
 		Str("name", config.Name).
 		Str("type", config.Type).
@@ -84,35 +96,130 @@ func (m *Manager) AddRegistry(config *types.RegistryConfig) error {
 }
 
 func (m *Manager) GetRegistry(name string) (Registry, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
 	registry, exists := m.registries[name]
 	if !exists {
-		return nil, fmt.Errorf("registry não encontrado: %s", name)
+		return nil, fmt.Errorf("registry %s não encontrado", name)
 	}
+
 	return registry, nil
 }
 
 func (m *Manager) ListRegistries() []string {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
 	var names []string
 	for name := range m.registries {
 		names = append(names, name)
 	}
+
 	return names
 }
 
+func (m *Manager) GetEnabledRegistries() []Registry {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	var enabled []Registry
+	for _, registry := range m.registries {
+		enabled = append(enabled, registry)
+	}
+
+	return enabled
+}
+
 func (m *Manager) HealthCheck(ctx context.Context) error {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	var errors []error
+
 	for name, registry := range m.registries {
+		m.logger.Debug("registry_health_check").
+			Str("name", name).
+			Send()
+
 		if err := registry.IsHealthy(ctx); err != nil {
-			m.logger.Warn("registry_unhealthy").
+			m.logger.Error("registry_health_check_failed").
 				Str("name", name).
 				Err(err).
 				Send()
-			return fmt.Errorf("registry %s não está saudável: %w", name, err)
+			errors = append(errors, fmt.Errorf("registry %s: %w", name, err))
+		} else {
+			m.logger.Info("registry_health_check_success").
+				Str("name", name).
+				Send()
 		}
-		m.logger.Debug("registry_healthy").
-			Str("name", name).
-			Send()
 	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("falhas no health check: %v", errors)
+	}
+
 	return nil
+}
+
+func (m *Manager) CheckImageExists(ctx context.Context, imageName string) (map[string]bool, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	results := make(map[string]bool)
+
+	for name, registry := range m.registries {
+		exists, err := registry.HasImage(ctx, imageName)
+		if err != nil {
+			m.logger.Warn("image_check_failed").
+				Str("registry", name).
+				Str("image", imageName).
+				Err(err).
+				Send()
+			continue
+		}
+
+		results[name] = exists
+
+		if exists {
+			m.logger.Debug("image_exists").
+				Str("registry", name).
+				Str("image", imageName).
+				Send()
+		}
+	}
+
+	return results, nil
+}
+
+func (m *Manager) ValidateImageDuplication(ctx context.Context, targetImage string) error {
+	existsMap, err := m.CheckImageExists(ctx, targetImage)
+	if err != nil {
+		return fmt.Errorf("falha ao verificar duplicação de imagem: %w", err)
+	}
+
+	var duplicatedRegistries []string
+	for registryName, exists := range existsMap {
+		if exists {
+			duplicatedRegistries = append(duplicatedRegistries, registryName)
+		}
+	}
+
+	if len(duplicatedRegistries) > 0 {
+		m.logger.Warn("image_already_exists").
+			Str("image", targetImage).
+			Strs("registries", duplicatedRegistries).
+			Send()
+		return fmt.Errorf("imagem %s já existe nos registries: %v", targetImage, duplicatedRegistries)
+	}
+
+	return nil
+}
+
+func (m *Manager) GetRegistryCount() int {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return len(m.registries)
 }
 
 func createHTTPClient(insecure bool) *http.Client {
