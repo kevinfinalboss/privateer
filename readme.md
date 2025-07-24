@@ -113,7 +113,7 @@ privateer scan cluster --dry-run
 privateer scan cluster --language=en-US
 ```
 
-### 4. Migrar Imagens ✨
+### 4. Migrar Imagens
 ```bash
 # Migração simulada (dry-run)
 privateer migrate cluster --dry-run
