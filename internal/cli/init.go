@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kevinfinalboss/privateer/internal/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -11,6 +12,18 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Inicializa configuração do Privateer",
 	Long:  "Cria arquivo de configuração inicial para o Privateer",
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if log == nil {
+			log = logger.New()
+		}
+
+		log.Info("app_started").
+			Str("version", "v0.1.0").
+			Str("operation", "init").
+			Send()
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},
