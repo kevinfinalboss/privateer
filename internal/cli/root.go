@@ -5,6 +5,7 @@ import (
 
 	"github.com/kevinfinalboss/privateer/internal/config"
 	"github.com/kevinfinalboss/privateer/internal/logger"
+	"github.com/kevinfinalboss/privateer/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +15,7 @@ var (
 	logLevel string
 	dryRun   bool
 	log      *logger.Logger
-	cfg      *config.Config
+	cfg      *types.Config
 )
 
 var rootCmd = &cobra.Command{
