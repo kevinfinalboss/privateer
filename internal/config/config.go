@@ -52,12 +52,19 @@ func Load(path string) (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return getDefaultConfig(), err
+		return nil, err
 	}
 
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
+	}
+
+	if config.Settings.Language == "" {
+		config.Settings.Language = "pt-BR"
+	}
+	if config.Settings.LogLevel == "" {
+		config.Settings.LogLevel = "info"
 	}
 
 	return &config, nil
@@ -68,7 +75,7 @@ func getDefaultConfigPath() string {
 	return filepath.Join(home, ".privateer", "config.yaml")
 }
 
-func getDefaultConfig() *Config {
+func GetDefaultConfig() *Config {
 	return &Config{
 		Settings: Settings{
 			Language: "pt-BR",
@@ -77,6 +84,11 @@ func getDefaultConfig() *Config {
 		},
 		Kubernetes: Kubernetes{
 			Context: "",
+		},
+		ImageDetection: ImageDetection{
+			CustomPublicRegistries:  []string{},
+			CustomPrivateRegistries: []string{},
+			IgnoreRegistries:        []string{},
 		},
 	}
 }
