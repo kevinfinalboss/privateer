@@ -1,14 +1,19 @@
 package types
 
 type RegistryConfig struct {
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	URL      string `yaml:"url,omitempty"`
-	Username string `yaml:"username,omitempty"`
-	Password string `yaml:"password,omitempty"`
-	Insecure bool   `yaml:"insecure,omitempty"`
-	Region   string `yaml:"region,omitempty"`
-	Project  string `yaml:"project,omitempty"`
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Enabled   bool     `yaml:"enabled"`
+	URL       string   `yaml:"url,omitempty"`
+	Username  string   `yaml:"username,omitempty"`
+	Password  string   `yaml:"password,omitempty"`
+	Insecure  bool     `yaml:"insecure,omitempty"`
+	Region    string   `yaml:"region,omitempty"`
+	Project   string   `yaml:"project,omitempty"`
+	AccountID string   `yaml:"account_id,omitempty"`
+	Profiles  []string `yaml:"profiles,omitempty"`
+	AccessKey string   `yaml:"access_key,omitempty"`
+	SecretKey string   `yaml:"secret_key,omitempty"`
 }
 
 type KubernetesConfig struct {
