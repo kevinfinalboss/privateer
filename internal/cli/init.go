@@ -18,7 +18,6 @@ var initCmd = &cobra.Command{
 		}
 
 		log.Info("app_started").
-			Str("version", "v0.1.0").
 			Str("operation", "init").
 			Send()
 
