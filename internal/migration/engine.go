@@ -9,6 +9,7 @@ import (
 
 	"github.com/kevinfinalboss/privateer/internal/logger"
 	"github.com/kevinfinalboss/privateer/internal/registry"
+	"github.com/kevinfinalboss/privateer/internal/reporter"
 	"github.com/kevinfinalboss/privateer/internal/webhook"
 	"github.com/kevinfinalboss/privateer/pkg/types"
 )
@@ -19,6 +20,7 @@ type Engine struct {
 	config          *types.Config
 	concurrency     int
 	discordWebhook  *webhook.DiscordWebhook
+	htmlReporter    *reporter.HTMLReporter
 }
 
 func NewEngine(registryManager *registry.Manager, logger *logger.Logger, cfg *types.Config) *Engine {
@@ -32,6 +34,7 @@ func NewEngine(registryManager *registry.Manager, logger *logger.Logger, cfg *ty
 		logger:          logger,
 		config:          cfg,
 		concurrency:     concurrency,
+		htmlReporter:    reporter.NewHTMLReporter(logger),
 	}
 
 	if cfg.Webhooks.Discord.Enabled && cfg.Webhooks.Discord.URL != "" {
@@ -85,6 +88,16 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 			if err != nil {
 				e.logger.Warn("discord_webhook_failed").Err(err).Send()
 			}
+		}
+
+		reportPath, err := e.htmlReporter.GenerateReport(summary, e.config, true)
+		if err != nil {
+			e.logger.Warn("html_report_failed").Err(err).Send()
+		} else {
+			e.logger.Info("html_report_ready").
+				Str("path", reportPath).
+				Str("message", "Relatório HTML de simulação gerado").
+				Send()
 		}
 
 		return summary, nil
@@ -149,6 +162,16 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 		if err != nil {
 			e.logger.Warn("discord_webhook_failed").Err(err).Send()
 		}
+	}
+
+	reportPath, err := e.htmlReporter.GenerateReport(summary, e.config, false)
+	if err != nil {
+		e.logger.Warn("html_report_failed").Err(err).Send()
+	} else {
+		e.logger.Info("html_report_ready").
+			Str("path", reportPath).
+			Str("message", "Relatório HTML de migração gerado").
+			Send()
 	}
 
 	return summary, nil
@@ -336,8 +359,29 @@ func (e *Engine) getHarborProject(registryName string) string {
 
 func (e *Engine) getECRURL(registryName string) string {
 	for _, regConfig := range e.config.Registries {
-		if regConfig.Name == registryName {
-			return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", regConfig.AccountID, regConfig.Region)
+		if regConfig.Name == registryName && regConfig.Type == "ecr" {
+			// Para ECR, precisamos garantir que o account_id esteja disponível
+			if regConfig.AccountID != "" {
+				return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", regConfig.AccountID, regConfig.Region)
+			}
+
+			// Se account_id não está na config, tenta descobrir do registry
+			reg, err := e.registryManager.GetRegistry(registryName)
+			if err == nil {
+				// Força login para descobrir account_id se necessário
+				ctx := context.Background()
+				if loginErr := reg.Login(ctx); loginErr == nil {
+					// Após login bem-sucedido, o account_id deve estar disponível
+					// Por enquanto, vamos usar um placeholder e deixar para descobrir na migração real
+					e.logger.Info("ecr_account_id_discovery").
+						Str("registry", registryName).
+						Str("message", "account_id será descoberto durante login do ECR").
+						Send()
+				}
+			}
+
+			// Retorna com placeholder que será resolvido durante a migração
+			return fmt.Sprintf("ACCOUNT_WILL_BE_DISCOVERED.dkr.ecr.%s.amazonaws.com", regConfig.Region)
 		}
 	}
 	return registryName
