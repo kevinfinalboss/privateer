@@ -8,61 +8,55 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/kevinfinalboss/privateer)](https://github.com/kevinfinalboss/privateer/releases)
 
-> **Migre suas imagens Docker públicas para registries privados de forma automatizada**
+> **Automate migration of Docker images from public to private registries**
 
-Privateer é uma ferramenta CLI que escaneia clusters Kubernetes e repositórios GitHub para identificar imagens Docker públicas e migrá-las automaticamente para registries privados, garantindo maior segurança e controle sobre sua infraestrutura.
+Privateer is a powerful CLI tool that scans Kubernetes clusters and GitHub repositories to identify public Docker images and automatically migrates them to private registries, ensuring enhanced security and control over your infrastructure.
 
-## 🎯 Objetivo
+## 🎯 Mission
 
-Com o crescimento das preocupações de segurança e compliance, muitas organizações precisam migrar suas imagens Docker de registries públicos (DockerHub, ECR Public, etc.) para registries privados. O Privateer automatiza esse processo complexo.
+As security and compliance concerns grow, organizations need to migrate their Docker images from public registries (DockerHub, ECR Public, etc.) to private registries. Privateer automates this complex process with enterprise-grade reliability.
 
-## ✨ Funcionalidades Implementadas
+## ✨ Features
 
-### 🔍 **Scanner Inteligente**
-- ✅ Escaneia clusters Kubernetes (Deployments, StatefulSets, DaemonSets, Jobs, CronJobs)
-- ✅ Detecta automaticamente imagens públicas vs privadas
-- ✅ Suporte a init containers e multi-container pods
-- ✅ Configuração customizada de registries públicos/privados
-- ✅ Filtragem por namespace
+### 🔍 **Intelligent Scanner**
+- ✅ **Kubernetes cluster scanning** (Deployments, StatefulSets, DaemonSets, Jobs, CronJobs)
+- ✅ **Automatic public/private image detection** with smart algorithms
+- ✅ **Init containers and multi-container pods** support
+- ✅ **Custom registry classification** rules
+- ✅ **Namespace filtering** and context switching
 
-### 🚀 **Engine de Migração**
-- ✅ **Pull/Tag/Push automático** para registries privados
-- ✅ **Docker Registry** (registry:2) - Funcional
-- ✅ **Harbor** - Funcional
-- ✅ **Dry-run mode** - Simulação sem alterações
-- ✅ **Processamento concorrente** (configurável)
-- ✅ **Health check** de registries
-- ⚠️ **AWS ECR** - Planejado para v0.2.0
-- ⚠️ **GitHub Container Registry** - Planejado para v0.2.0
+### 🚀 **Migration Engine**
+- ✅ **Automated Pull/Tag/Push workflow** to private registries
+- ✅ **Multiple registry support** with priority-based selection
+- ✅ **Concurrent processing** (configurable 1-10 threads)
+- ✅ **Dry-run mode** for safe testing and validation
+- ✅ **Health checks** and authentication validation
+- ✅ **Duplicate detection** and anti-collision system
 
-### 🌐 **Multi-Registry Support**
-- ✅ **Docker Registry** (registry:2)
-- ✅ **Harbor** (self-hosted)
-- ✅ **Autenticação htpasswd**
-- ✅ **SSL/TLS** com certificados
-- ✅ **HTTP insecure** mode
-- 🚧 **AWS ECR** (em desenvolvimento)
-- 🚧 **Azure Container Registry** (planejado)
-- 🚧 **GitHub Container Registry** (planejado)
+### 🎯 **Registry Support**
+- ✅ **Docker Registry** (registry:2) - Production ready
+- ✅ **Harbor** (self-hosted) - Production ready  
+- ✅ **AWS ECR** (Elastic Container Registry) - Production ready
+- 🚧 **GitHub Container Registry** - Coming in v0.3.0
+- 🚧 **Azure Container Registry** - Coming in v0.3.0
+- 🚧 **Google Container Registry** - Coming in v0.3.0
 
-### 🌍 **Internacionalização**
-- ✅ Português (pt-BR) - Nativo
-- ✅ Inglês (en-US) 
-- ✅ Espanhol (es-ES)
-- ✅ Sistema de traduções baseado em arquivos YAML
+### 🔧 **Advanced Configuration**
+- ✅ **Priority-based registry selection** (0-100 scale)
+- ✅ **Multiple registries mode** vs single registry mode
+- ✅ **AWS ECR authentication** (3 methods: credentials, profiles, IAM)
+- ✅ **SSL/TLS support** with insecure mode option
+- ✅ **Custom detection rules** for public/private classification
 
-### 🛠️ **DevOps Ready**
-- ✅ CLI intuitivo com Cobra
-- ✅ Logs estruturados com Zerolog
-- ✅ Configuração YAML flexível
-- ✅ Builds multi-plataforma (Linux, macOS, Windows)
-- ✅ Scripts de instalação automatizada
-- ✅ Namespace filtering
-- ✅ Context switching
+### 📊 **Professional Reporting**
+- ✅ **HTML reports** with visual charts and statistics
+- ✅ **Discord webhook integration** for real-time notifications
+- ✅ **Detailed migration logs** with structured JSON output
+- ✅ **Success/failure metrics** and performance analytics
 
-## 🚀 Instalação
+## 🚀 Installation
 
-### Via Script (Recomendado)
+### Quick Installation (Recommended)
 
 **Linux/macOS:**
 ```bash
@@ -74,303 +68,310 @@ curl -sSL https://raw.githubusercontent.com/kevinfinalboss/privateer/main/script
 irm https://raw.githubusercontent.com/kevinfinalboss/privateer/main/scripts/install.ps1 | iex
 ```
 
-### Via Go Install
+### Alternative Methods
+
+**Go Install:**
 ```bash
 go install github.com/kevinfinalboss/privateer/cmd/privateer@latest
 ```
 
-### Via Release
-Baixe o binário para sua plataforma em [Releases](https://github.com/kevinfinalboss/privateer/releases)
+**Manual Download:**
+Download binaries from [GitHub Releases](https://github.com/kevinfinalboss/privateer/releases)
 
-## 📋 Uso Rápido
+## 📋 Quick Start
 
-### 1. Inicializar Configuração
+### 1. Initialize Configuration
 ```bash
 privateer init
 ```
 
-### 2. Configurar Registry
-Edite `~/.privateer/config.yaml`:
+### 2. Configure Registries
+Edit `~/.privateer/config.yaml`:
 ```yaml
 registries:
-  - name: "my-registry"
+  # Docker Registry with highest priority
+  - name: "docker-local"
     type: "docker"
-    url: "https://registry.example.com"
+    enabled: true
+    priority: 10  # Highest priority (0-100)
+    url: "registry.company.com"
     username: "admin"
-    password: "password123"
+    password: "secure-password"
     insecure: false
+    
+  # AWS ECR with medium priority
+  - name: "ecr-prod"
+    type: "ecr"
+    enabled: true
+    priority: 5
+    region: "us-east-1"
+    account_id: "123456789012"
+    # Uses default AWS credentials
+
+settings:
+  multiple_registries: false  # true = all enabled registries
+                              # false = highest priority only
+  concurrency: 3
+  
+webhooks:
+  discord:
+    enabled: true
+    url: "https://discord.com/api/webhooks/..."
 ```
 
-### 3. Escanear Cluster
+### 3. Scan Cluster
 ```bash
-# Scan básico
+# Basic scan
 privateer scan cluster
 
-# Dry-run (sem modificações)
+# Dry-run simulation
 privateer scan cluster --dry-run
 
-# Diferentes idiomas
+# Different language
 privateer scan cluster --language=en-US
 ```
 
-### 4. Migrar Imagens
+### 4. Migrate Images
 ```bash
-# Migração simulada (dry-run)
+# Simulate migration (generates HTML report)
 privateer migrate cluster --dry-run
 
-# Migração real
+# Execute migration (generates HTML report + Discord notifications)
 privateer migrate cluster
 ```
 
-## ⚙️ Configuração Completa
+## ⚙️ Advanced Configuration
 
-O arquivo de configuração é criado em `~/.privateer/config.yaml`:
-
+### Registry Priority System
 ```yaml
-# Registries de destino para migração
 registries:
-  # Docker Registry (registry:2)
-  - name: "my-docker-registry"
-    type: "docker"
-    url: "https://registry.example.com"
-    username: "admin"
-    password: "password123"
-    insecure: false
+  - name: "primary-registry"
+    priority: 10  # Highest priority
+    enabled: true
     
-  # Harbor registry
-  - name: "harbor-prod"
-    type: "harbor"
-    url: "https://harbor.company.com"
-    username: "admin"
-    password: "Harbor12345"
-    project: "library"
-    insecure: false
-
-# Configuração do Kubernetes
-kubernetes:
-  context: ""  # Deixe vazio para contexto atual
-  namespaces: 
-    - "production"
-    - "staging"
-  # Deixe vazio para todas as namespaces
-
-# Configurações gerais
-settings:
-  language: "pt-BR"     # pt-BR, en-US, es-ES
-  log_level: "info"     # debug, info, warn, error
-  dry_run: false        # true para simular
-  concurrency: 3        # Migrações simultâneas
-
-# Detecção avançada de imagens
-image_detection:
-  # Forçar como públicos
-  custom_public_registries:
-    - "quay.io/prometheus"
-    - "registry.k8s.io"
-    - "public.ecr.aws"
+  - name: "backup-registry"  
+    priority: 5   # Medium priority
+    enabled: true
     
-  # Forçar como privados  
-  custom_private_registries:
-    - "registry.example.com"
-    - "harbor.company.com"
-    
-  # Ignorar completamente
-  ignore_registries:
-    - "localhost"
-    - "127.0.0.1"
+  - name: "archive-registry"
+    priority: 1   # Lowest priority
+    enabled: false  # Disabled
 ```
 
-## 🏗️ Arquitetura
+**Behavior:**
+- `multiple_registries: false` → Only highest priority registry receives images
+- `multiple_registries: true` → All enabled registries receive images
+
+### AWS ECR Authentication Methods
+
+**Method 1: Direct Credentials**
+```yaml
+- name: "ecr-direct"
+  type: "ecr"
+  region: "us-east-1"
+  access_key: "AKIAIOSFODNN7EXAMPLE"
+  secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+**Method 2: AWS Profiles**
+```yaml
+- name: "ecr-profiles"
+  type: "ecr"
+  region: "us-east-1"
+  account_id: "123456789012"  # Required for profile filtering
+  profiles:
+    - "production"
+    - "default"
+```
+
+**Method 3: Default Credentials (Recommended)**
+```yaml
+- name: "ecr-default"
+  type: "ecr"
+  region: "us-east-1"
+  # Uses IAM roles, environment variables, or ~/.aws/credentials
+```
+
+## 📊 HTML Reports
+
+Privateer automatically generates professional HTML reports for every migration:
+
+### Report Locations
+```
+~/.privateer/reports/
+├── privateer-dryrun-2025-01-24_15-30-45.html   # Simulation reports
+├── privateer-report-2025-01-24_16-45-12.html   # Production reports
+└── privateer-dryrun-2025-01-24_17-20-33.html   # Historical reports
+```
+
+### Report Contents
+- 📈 **Executive dashboard** with key metrics and success rates
+- 🎯 **Registry-specific statistics** with priority information
+- 📋 **Detailed migration list** with source/target mappings
+- ⚙️ **Configuration summary** showing enabled registries
+- 🏴‍☠️ **Professional design** optimized for sharing and archival
+
+## 🏗️ Architecture
 
 ```
 privateer/
-├── cmd/privateer/          # Ponto de entrada da aplicação
+├── cmd/privateer/          # Application entry point
 ├── internal/
-│   ├── cli/               # Comandos CLI (Cobra)
-│   ├── config/            # Gerenciamento de configuração
-│   ├── kubernetes/        # Cliente e scanner K8s
-│   ├── logger/            # Sistema de logs i18n
-│   ├── registry/          # Gerenciadores de registry
-│   └── migration/         # Engine de migração
-├── pkg/types/             # Tipos compartilhados
-├── locales/               # Arquivos de tradução
-├── scripts/               # Scripts de build e instalação
-└── configs/               # Exemplos de configuração
+│   ├── cli/               # CLI commands (Cobra)
+│   ├── config/            # Configuration management
+│   ├── kubernetes/        # K8s client and scanner
+│   ├── logger/            # Structured logging with i18n
+│   ├── registry/          # Registry implementations
+│   ├── migration/         # Migration engine
+│   ├── reporter/          # HTML report generation
+│   └── webhook/           # Discord notifications
+├── pkg/types/             # Shared type definitions
+├── locales/               # Translation files
+└── scripts/               # Installation and build scripts
 ```
 
-## 🎯 Exemplos de Uso
+## 🎯 Use Cases
 
-### Migração de Namespace Específica
+### Enterprise Migration Scenario
 ```bash
-# Configure no config.yaml
-kubernetes:
-  namespaces: ["lavalink"]
+# Configuration for enterprise with multiple registries
+registries:
+  - name: "production-ecr"
+    type: "ecr"
+    enabled: true
+    priority: 10
+    region: "us-east-1"
+    
+  - name: "backup-harbor"
+    type: "harbor"
+    enabled: true
+    priority: 5
+    url: "harbor.company.com"
+    project: "backup"
 
-# Execute migração
-privateer migrate cluster --dry-run  # Simular
-privateer migrate cluster            # Executar
+# Execute with notifications
+privateer migrate cluster
 ```
 
-### Resultado da Migração
+**Result:**
+- **Single mode**: Only production-ecr receives images (priority 10 > 5)
+- **Multiple mode**: Both registries receive identical copies
+- **Reports**: HTML report saved to `~/.privateer/reports/`
+- **Notifications**: Discord alerts with migration status
+
+### Compliance and Audit
 ```bash
-# ANTES:
-# alpine:latest (DockerHub)
+# Generate compliance report
+privateer migrate cluster --dry-run --log-level debug
 
-# DEPOIS:  
-# registry.example.com/alpine:latest (Seu registry)
+# View detailed HTML report
+open ~/.privateer/reports/privateer-dryrun-*.html
 ```
 
-### Verificar Imagens Migradas
-```bash
-# Listar repositórios
-curl -u user:pass https://registry.example.com/v2/_catalog
+## 📈 Roadmap
 
-# Listar tags
-curl -u user:pass https://registry.example.com/v2/alpine/tags/list
-```
+### ✅ **v0.2.0 - Current (Registry Expansion)**
+- [x] AWS ECR integration with 3 authentication methods
+- [x] Priority-based registry selection system
+- [x] Multiple registries support with intelligent routing
+- [x] HTML reporting with visual charts and statistics
+- [x] Discord webhook integration for real-time notifications
+- [x] Advanced duplicate detection and anti-collision system
 
-## 📊 Status do Projeto
+### 🚧 **v0.3.0 - GitOps Integration (Q2 2025)**
+- [ ] GitHub Container Registry support
+- [ ] Azure Container Registry integration
+- [ ] GitHub repository scanning for Dockerfiles
+- [ ] Automated Pull Request generation with updated images
+- [ ] ArgoCD/Flux integration for GitOps workflows
 
-### ✅ **v0.1.0 - Implementado**
-- [x] Core CLI com Cobra
-- [x] Sistema de configuração YAML  
-- [x] Scanner completo de Kubernetes
-- [x] Detecção inteligente de imagens públicas/privadas
-- [x] Sistema de i18n (3 idiomas)
-- [x] Logs estruturados
-- [x] Engine de migração
-- [x] Suporte a Docker Registry
-- [x] Suporte a Harbor
-- [x] Processamento concorrente
-- [x] Health checks de registry
+### 🎯 **v0.4.0 - Enterprise Features (Q3 2025)**
+- [ ] Web dashboard with real-time monitoring
+- [ ] Prometheus metrics and alerting
+- [ ] RBAC and multi-tenancy support
+- [ ] Compliance reporting and audit trails
+- [ ] Advanced scheduling and batch processing
 
-### 🚧 **v0.2.0 - Em Desenvolvimento**
-- [ ] Integração com AWS ECR
-- [ ] Integração com Azure Container Registry
-- [ ] Integração com GitHub Container Registry
-- [ ] Sistema de retry com exponential backoff
-- [ ] Cleanup automático de imagens locais
-- [ ] Métricas de performance
+## 💻 Development
 
-### 📝 **v0.3.0 - Planejado**
-- [ ] Scanner de repositórios GitHub
-- [ ] Geração automática de manifests atualizados
-- [ ] Sistema de Pull Requests automático
-- [ ] Integração com ArgoCD/Flux
-- [ ] Interface web (dashboard)
-
-### 🎯 **v0.4.0 - Futuro**
-- [ ] Métricas Prometheus
-- [ ] Webhooks para CI/CD
-- [ ] Políticas de retenção
-- [ ] Scan de vulnerabilidades
-- [ ] RBAC e multi-tenancy
-
-## 💻 Desenvolvimento
-
-### Pré-requisitos
+### Prerequisites
 - Go 1.24+
-- Kubernetes cluster (para testes)
-- Docker (para registry local)
+- Kubernetes cluster (for testing)
+- Docker (for local registry testing)
 
-### Build Local
+### Local Development
 ```bash
-# Clone o repositório
+# Clone repository
 git clone https://github.com/kevinfinalboss/privateer.git
 cd privateer
 
-# Instalar dependências
+# Install dependencies
 go mod download
 
-# Build desenvolvimento
+# Development build
 make dev
 
-# Build para produção
-make build
-
-# Executar testes
+# Run tests
 make test
+
+# Local execution
+make run ARGS="scan cluster --dry-run"
 ```
 
-### Comandos Úteis
+### Build System
 ```bash
-# Executar diretamente
-make run ARGS="scan cluster --dry-run"
-
-# Build multi-plataforma
+# Multi-platform release
 make release
 
-# Limpar builds
+# Clean build artifacts
 make clean
+
+# Code quality checks
+make lint
 ```
 
-## 🤝 Contribuição
+## 🤝 Contributing
 
-Contribuições são muito bem-vindas! 
+We welcome contributions from the community!
 
-### Como Contribuir
-1. Fork o projeto
-2. Crie uma branch (`git checkout -b feature/nova-funcionalidade`)
-3. Commit suas mudanças (`git commit -am 'Adiciona nova funcionalidade'`)
-4. Push para a branch (`git push origin feature/nova-funcionalidade`)
-5. Abra um Pull Request
+### How to Contribute
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
 
-### Adicionando Novos Registries
-1. Implemente a interface `Registry` em `internal/registry/`
-2. Adicione suporte no `NewEngine()` em `manager.go`
-3. Teste com diferentes cenários
-4. Atualize a documentação
+### Adding New Registries
+1. Implement the `Registry` interface in `internal/registry/`
+2. Add support in `NewEngine()` in `manager.go`
+3. Update configuration examples and documentation
+4. Add comprehensive tests
 
-## 📈 Roadmap Detalhado
+### Storage Requirements
+```
+~/.privateer/
+├── config.yaml          # <1KB - Configuration
+└── reports/              # ~100KB per report
+    └── *.html           # Self-contained HTML files
+```
 
-### v0.2.0 - Registry Expansion
-- ✅ Docker Registry (registry:2) 
-- ✅ Harbor
-- 🚧 AWS ECR
-- 🚧 Azure Container Registry  
-- 🚧 GitHub Container Registry
-- 🚧 Google Container Registry
+## 📄 License
 
-### v0.3.0 - GitOps Integration
-- 🔄 Scanner de Dockerfiles
-- 🔄 Detecção em docker-compose.yml
-- 🔄 Pull Requests automáticos
-- 🔄 Integração com GitHub Actions
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-### v0.4.0 - Enterprise Features
-- 📊 Dashboard web
-- 📈 Métricas avançadas
-- 🔐 RBAC
-- 📋 Audit logs
+## 🙋‍♂️ Support & Community
 
-## 💾 Armazenamento Local
+- 📧 **Email**: [kevinmg50@gmail.com](mailto:kevinmg50@gmail.com)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/kevinfinalboss/privateer/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/kevinfinalboss/privateer/discussions)
+- 📖 **Documentation**: [docs/](docs/)
 
-O Privateer armazena **minimamente** na máquina do usuário:
+## 🎉 Acknowledgments
 
-### ✅ Armazenado Permanentemente:
-- **Binário**: `/usr/local/bin/privateer` (~10MB)
-- **Config**: `~/.privateer/config.yaml` (~1KB)
-
-### 🗑️ Cache Temporário (Durante Migração):
-- **Imagens Docker**: Cache temporário durante pull/push
-- **Logs**: Apenas no terminal (não persistidos)
-
-## 📄 Licença
-
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## 🙋‍♂️ Suporte
-
-- 📧 Email: [kevinmg50@gmail.com]
-- 🐛 Issues: [GitHub Issues](https://github.com/kevinfinalboss/privateer/issues)
-- 💬 Discussões: [GitHub Discussions](https://github.com/kevinfinalboss/privateer/discussions)
-
-## 🎉 Agradecimentos
-
-- [Cobra](https://github.com/spf13/cobra) - CLI framework
-- [Zerolog](https://github.com/rs/zerolog) - Logging estruturado  
-- [Kubernetes Client](https://github.com/kubernetes/client-go) - API do Kubernetes
-- Comunidade Go e Kubernetes
+- [Cobra](https://github.com/spf13/cobra) - Powerful CLI framework
+- [Zerolog](https://github.com/rs/zerolog) - High-performance structured logging
+- [Kubernetes Client](https://github.com/kubernetes/client-go) - Official Kubernetes API client
+- [AWS SDK](https://github.com/aws/aws-sdk-go-v2) - AWS integration
 
 ---
 
@@ -378,8 +379,8 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 
 ![Privateer Logo](.github/images/privateer-logo.png)
 
-**[⭐ Star no GitHub](https://github.com/kevinfinalboss/privateer) • [📖 Documentação](docs/) • [🔄 Changelog](CHANGELOG.md)**
+**[⭐ Star on GitHub](https://github.com/kevinfinalboss/privateer) • [📖 Documentation](docs/) • [🔄 Changelog](CHANGELOG.md)**
 
-Made with ❤️ for the DevOps community
+*Built with ❤️ for the DevOps and Platform Engineering community*
 
 </div>
