@@ -96,12 +96,45 @@ func scanCluster() error {
 }
 
 func scanGithub() error {
-	log.Info("scanning_cluster").
-		Str("organization", cfg.GitHub.Organization).
+	if !cfg.GitHub.Enabled {
+		log.Warn("github_not_enabled").
+			Str("message", "GitHub scanning não está habilitado na configuração").
+			Send()
+		return nil
+	}
+
+	if cfg.GitHub.Token == "" {
+		log.Error("github_token_missing").
+			Str("message", "Token GitHub não configurado").
+			Send()
+		return nil
+	}
+
+	enabledRepos := 0
+	for _, repo := range cfg.GitHub.Repositories {
+		if repo.Enabled {
+			enabledRepos++
+		}
+	}
+
+	log.Info("scanning_github_repositories").
+		Int("total_repositories", len(cfg.GitHub.Repositories)).
+		Int("enabled_repositories", enabledRepos).
 		Send()
+
+	for _, repo := range cfg.GitHub.Repositories {
+		if repo.Enabled {
+			log.Info("github_repository_configured").
+				Str("repository", repo.Name).
+				Int("priority", repo.Priority).
+				Strs("paths", repo.Paths).
+				Send()
+		}
+	}
 
 	log.Info("operation_completed").
 		Str("operation", "github_scan").
+		Str("message", "Use 'privateer migrate github --dry-run' para escanear repositórios").
 		Send()
 
 	return nil
