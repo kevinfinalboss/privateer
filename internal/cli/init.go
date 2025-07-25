@@ -118,11 +118,118 @@ kubernetes:
   #   - "production" 
   #   - "staging"
 
-# Configuração do GitHub (futuro - v0.3.0)
+# Configuração do GitHub para GitOps
 github:
-  token: ""  # Token do GitHub para scan de repositórios
-  organization: ""  # Sua organização no GitHub
-  repositories: []  # Repositórios específicos ou vazio para todos
+  enabled: false  # true para habilitar migração de repositórios GitHub
+  token: ""  # Token do GitHub (ghp_..., fine-grained token ou classic)
+  repositories:
+    # Repositório principal de manifests
+    - name: "company/app-manifests"
+      enabled: true
+      priority: 10  # Maior prioridade para processar primeiro
+      paths:  # Caminhos específicos para buscar imagens
+        - "apps/"
+        - "manifests/"
+        - "k8s/"
+        - "charts/*/values*.yaml"
+      excluded_paths:  # Caminhos para ignorar
+        - ".git/"
+        - "node_modules/"
+        - "vendor/"
+        - "docs/"
+      branch_strategy: "create_new"  # create_new ou use_main
+      pr_settings:
+        auto_merge: false  # true para auto-merge (cuidado!)
+        reviewers: ["devops-team", "platform-team"]  # Revisores obrigatórios
+        labels: ["privateer", "security", "automated"]  # Labels do PR
+        template: ".github/pr-templates/privateer.md"  # Template personalizado
+        draft: false  # true para criar como draft
+        commit_prefix: "🏴‍☠️ Privateer:"  # Prefixo dos commits
+        
+    # Repositório de Helm Charts
+    - name: "company/helm-charts"
+      enabled: true
+      priority: 8
+      paths:
+        - "charts/*/values.yaml"
+        - "charts/*/values-*.yaml" 
+        - "charts/*/templates/"
+      excluded_paths:
+        - ".git/"
+        - "docs/"
+      branch_strategy: "create_new"
+      pr_settings:
+        auto_merge: false
+        reviewers: ["helm-maintainers"]
+        labels: ["privateer", "helm-charts"]
+        draft: false
+        
+    # Repositório ArgoCD Applications (exemplo)
+    - name: "company/argocd-apps"
+      enabled: false  # Desabilitado por padrão
+      priority: 5
+      paths:
+        - "applications/"
+        - "projects/"
+        - "app-of-apps/"
+      excluded_paths:
+        - ".git/"
+      branch_strategy: "create_new"
+      pr_settings:
+        auto_merge: false
+        reviewers: ["argocd-admins"]
+        labels: ["privateer", "argocd"]
+        draft: true  # Draft por segurança
+
+# Configuração avançada do GitOps
+gitops:
+  enabled: false  # true para habilitar funcionalidade GitOps
+  strategy: "smart_search"  # smart_search, annotation_based, manual_mapping
+  auto_pr: true  # false para apenas preparar mudanças sem criar PR
+  branch_prefix: "privateer/migrate-"  # Prefixo das branches criadas
+  commit_message: "🏴‍☠️ Migrate {image} to private registry"  # Template da mensagem
+  
+  # Padrões de busca personalizados
+  search_patterns:
+    - pattern: "image:\\s*([^\\s]+)"  # YAML: image: nginx:latest
+      file_types: ["yaml", "yml"]
+      description: "YAML image field"
+      enabled: true
+      
+    - pattern: "repository:\\s*([^\\s]+)"  # Helm: repository: nginx
+      file_types: ["yaml", "yml"]
+      description: "Helm repository field"
+      enabled: true
+      
+    - pattern: "newName:\\s*([^\\s]+)"  # Kustomize: newName: nginx
+      file_types: ["yaml", "yml"]
+      description: "Kustomize newName field"
+      enabled: true
+  
+  # Regras de mapeamento para casos específicos
+  mapping_rules:
+    # Mapeamento direto namespace → repositório
+    - namespace: "production"
+      repository: "company/production-manifests"
+      path: "apps/"
+      mapping_type: "direct"
+      confidence: 1.0
+      source: "manual"
+      
+    # Mapeamento por nome da aplicação
+    - app_name: "frontend"
+      repository: "company/frontend-config"
+      path: "k8s/"
+      mapping_type: "app_name"
+      confidence: 0.9
+      source: "heuristic"
+  
+  # Configurações de validação
+  validation:
+    validate_yaml: true     # Validar sintaxe YAML após mudanças
+    validate_helm: true     # Validar charts Helm se disponível
+    check_image_exists: true # Verificar se imagem existe no registry privado
+    dry_run_kubernetes: false # Fazer dry-run no Kubernetes (futuro)
 
 # Configurações gerais da aplicação
 settings:
@@ -170,156 +277,120 @@ image_detection:
 
 # 📝 DOCUMENTAÇÃO COMPLETA DE USO:
 #
-# 🎯 SISTEMA DE PRIORIDADE:
-# - priority: 0-100 (maior número = maior prioridade)
-# - Apenas registries com enabled: true são considerados
-# - Se multiple_registries: false → apenas o de maior prioridade recebe
-# - Se multiple_registries: true → TODOS os habilitados recebem
+# 🎯 NOVO: GITOPS E GITHUB INTEGRATION
 #
-# Exemplo de cenário com sua configuração:
-# - docker-local: enabled=true, priority=10
-# - ecr-credentials: enabled=true, priority=5  
-# - harbor-prod: enabled=false, priority=8
+# 🚀 COMANDOS GITOPS:
+# privateer migrate github --dry-run      # Simular migração GitHub
+# privateer migrate github                # Executar migração GitHub + PRs
+# privateer migrate all --dry-run         # Simular cluster + GitHub
+# privateer migrate all                   # Executar cluster + GitHub
 #
-# Resultado com multiple_registries: false → apenas docker-local
-# Resultado com multiple_registries: true → docker-local + ecr-credentials
+# 🔧 CONFIGURAÇÃO GITHUB:
+# 1. Crie um token GitHub:
+#    - Settings → Developer settings → Personal access tokens
+#    - Ou use fine-grained tokens para repositórios específicos
+#    - Permissões necessárias: repo, pull_requests, contents
 #
-# 🔧 CAMPOS DE CONFIGURAÇÃO POR TIPO:
+# 2. Configure repositories:
+#    - name: "owner/repository" (obrigatório)
+#    - paths: onde buscar por imagens
+#    - excluded_paths: o que ignorar
+#    - pr_settings: como criar os PRs
 #
-# DOCKER REGISTRY:
-# - url: URL completa (https://registry.example.com)
-# - username: Nome de usuário
-# - password: Senha
-# - insecure: true para HTTP sem SSL
+# 3. Configure GitOps:
+#    - strategy: como mapear cluster → repositórios
+#    - search_patterns: regex para encontrar imagens
+#    - validation: validações antes de criar PR
 #
-# HARBOR REGISTRY:
-# - url: URL completa (https://harbor.company.com)
-# - username: Nome de usuário do Harbor
-# - password: Senha do Harbor
-# - project: Projeto do Harbor (padrão: "library")
-# - insecure: true para HTTP sem SSL
+# 🎯 ESTRATÉGIAS DE MAPEAMENTO:
 #
-# AWS ECR:
-# - region: Região AWS (us-east-1, eu-west-1, etc.)
-# - account_id: ID da conta AWS (opcional, descoberto automaticamente)
-# - access_key: Chave de acesso AWS (método 1)
-# - secret_key: Chave secreta AWS (método 1)
-# - profiles: Lista de profiles ~/.aws/credentials (método 2)
-# - (método 3: credenciais padrão do ambiente - sem campos extras)
+# SMART_SEARCH (padrão):
+# - Busca por anotações ArgoCD/Helm no Kubernetes
+# - Mapeia por nome da aplicação
+# - Busca heurística em repositórios configurados
 #
-# GITHUB CONTAINER REGISTRY:
-# - username: Seu usuário GitHub
-# - password: Token GitHub (ghp_...)
-# - project: Nome da organização GitHub
+# ANNOTATION_BASED:
+# - Apenas usa anotações específicas do Kubernetes
+# - Mais conservador, menos false positives
 #
-# 🔔 WEBHOOKS DISCORD:
-# 1. Crie um webhook no seu servidor Discord:
-#    - Configurações do Servidor → Integrações → Webhooks → Novo Webhook
-# 2. Copie a URL do webhook
-# 3. Configure enabled: true e cole a URL
-# 4. O Privateer enviará notificações de início, fim e erros
+# MANUAL_MAPPING:
+# - Apenas usa mapping_rules configuradas manualmente
+# - Controle total, mas requer configuração completa
 #
-# 📊 NOTIFICAÇÕES INCLUEM:
-# - Início da migração (quantas imagens, quais registries)
-# - Progresso em tempo real 
-# - Resultado final (sucessos, falhas, ignoradas)
-# - Exemplos de migrações realizadas
-# - Detalhes de erros quando ocorrem
+# 📊 TIPOS DE ARQUIVO SUPORTADOS:
+# - Kubernetes Manifests (.yaml/.yml)
+# - Helm Values (values*.yaml)
+# - ArgoCD Applications (.yaml/.yml)
+# - Kustomization (kustomization.yaml)
+# - Docker Compose (compose*.yaml) - futuro
 #
-# 🚀 COMANDOS ESSENCIAIS:
-# privateer init                          # Gerar esta configuração
-# privateer scan cluster                  # Listar imagens públicas
-# privateer scan cluster --dry-run        # Simular scan
-# privateer migrate cluster --dry-run     # Simular migração + Discord
-# privateer migrate cluster               # Executar migração + Discord
-# privateer migrate cluster --log-level debug  # Logs detalhados
+# 🔍 PADRÕES DE IMAGEM DETECTADOS:
+# image: nginx:latest                    # Kubernetes containers
+# repository: nginx / tag: latest        # Helm separated values
+# newName: nginx / newTag: latest        # Kustomize
+# values: |                              # ArgoCD inline values
+#   image: nginx:latest
 #
-# ⚙️ AWS ECR - 3 MÉTODOS DE AUTENTICAÇÃO:
+# ⚙️ EXEMPLO DE WORKFLOW COMPLETO:
 #
-# MÉTODO 1: Credenciais Diretas (menos seguro, para testes)
-# - access_key: "AKIAIOSFODNN7EXAMPLE"
-# - secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+# 1. Migrar imagens no cluster:
+#    privateer migrate cluster
 #
-# MÉTODO 2: Profiles AWS (recomendado para múltiplas contas)
-# - profiles: ["production", "default", "company-aws"]
-# - account_id: "503935937141"  # Obrigatório para filtrar profiles
+# 2. Atualizar repositórios GitHub:
+#    privateer migrate github --dry-run  # Verificar mudanças
+#    privateer migrate github            # Criar PRs
 #
-# MÉTODO 3: Credenciais Padrão (mais seguro para produção)
-# - IAM Roles (EC2/ECS/Lambda)
-# - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-# - ~/.aws/credentials com profile [default]
+# 3. Revisar e aprovar PRs criados
 #
-# 🔍 VALIDAÇÃO ANTI-DUPLICAÇÃO:
-# - Verifica se imagem já existe antes de migrar
-# - ECR: cria repositórios automaticamente se necessário
-# - Docker/Harbor: verifica manifests via API
-# - Evita sobrescrever imagens existentes
-# - Logs detalhados de duplicações detectadas
+# 4. Deploy das mudanças (ArgoCD/Flux automático)
 #
-# 🎮 CENÁRIOS DE TESTE PRÁTICOS:
+# 🎮 CENÁRIOS DE TESTE:
 #
-# CENÁRIO 1: Registry único (modo conservador)
-# multiple_registries: false
-# enabled: docker-local=true, ecr-credentials=true
-# priority: docker-local=10, ecr-credentials=5
-# Resultado: apenas docker-local recebe (maior prioridade)
+# CENÁRIO 1: Monorepo
+# - Um repositório com múltiplas aplicações
+# - paths: ["apps/", "services/", "infra/"]
+# - O Privateer busca em todos os paths
 #
-# CENÁRIO 2: Múltiplos registries (modo backup/redundância)
-# multiple_registries: true
-# enabled: docker-local=true, ecr-credentials=true
-# Resultado: AMBOS recebem a mesma imagem
+# CENÁRIO 2: Repositórios separados
+# - Cada aplicação tem seu próprio repositório
+# - Configure um repository config para cada um
+# - mapping_rules para casos específicos
 #
-# CENÁRIO 3: Failover automático
-# enabled: docker-local=false, ecr-credentials=true
-# Resultado: ecr-credentials recebe (único habilitado)
-#
-# CENÁRIO 4: Teste com Harbor
-# enabled: harbor-prod=true, priority=8
-# multiple_registries: false
-# Resultado: harbor-prod recebe se for o de maior prioridade habilitado
-#
-# 💡 DICAS DE CONFIGURAÇÃO:
-# - Use priority 10 para registry principal de produção
-# - Use priority 5-8 para registries secundários  
-# - Use priority 1-3 para registries de backup/teste
-# - Deixe enabled=false em registries não utilizados no momento
-# - Configure Discord para monitorar migrações importantes em produção
-# - Use insecure=true apenas em ambientes de desenvolvimento local
-# - Para ECR, prefira profiles ou IAM roles em vez de credenciais diretas
+# CENÁRIO 3: Helm Charts centralizados
+# - Repository separado só para charts
+# - paths: ["charts/*/values*.yaml"]
+# - pr_settings específicos para helm-maintainers
 #
 # 🔒 SEGURANÇA E BOAS PRÁTICAS:
-# - Senhas em texto plano apenas para desenvolvimento/teste
-# - Use profiles AWS ou IAM roles em produção
-# - Configure HTTPS (insecure=false) sempre que possível
-# - Monitore logs para tentativas de acesso não autorizadas
-# - Rotacione credenciais regularmente
-# - Use tokens GitHub com escopo mínimo necessário
-# - Mantenha backups das configurações importantes
+# - Use fine-grained tokens quando possível
+# - Configure reviewers obrigatórios
+# - Use draft: true para PRs críticos
+# - Sempre teste com --dry-run primeiro
+# - Configure excluded_paths para evitar falsos positivos
+# - Use branch_strategy: "create_new" sempre
+# - Monitore os logs para problemas de autenticação
 #
-# 🔧 DETECÇÃO AUTOMÁTICA DE REGISTRIES:
-# 
-# PÚBLICOS (detectados automaticamente):
-# - docker.io/* (DockerHub)
-# - quay.io/* (Red Hat Quay)
-# - registry.k8s.io/* (Kubernetes)
-# - public.ecr.aws/* (AWS ECR Public)
-# - mcr.microsoft.com/* (Microsoft)
+# 💡 TROUBLESHOOTING COMUM:
+# - Token sem permissões: verificar scopes
+# - Repository não encontrado: verificar name format
+# - PRs não criados: verificar pr_settings.reviewers existem
+# - Imagens não encontradas: verificar search_patterns
+# - YAML inválido após mudança: habilitar validation.validate_yaml
 #
-# PRIVADOS (detectados automaticamente):
-# - *.dkr.ecr.*.amazonaws.com/* (AWS ECR Private)
-# - *.azurecr.io/* (Azure Container Registry)
-# - *.gcr.io/* e *.pkg.dev/* (Google Container Registry)
-# - ghcr.io/*/* (GitHub Container Registry com org)
-# - qualquer.dominio.com/* (registries com domínio customizado)
-#
-# Use as configurações custom_* acima para sobrescrever a detecção automática.
+# 🎉 INTEGRAÇÃO COM DISCORD:
+# As notificações Discord agora incluem:
+# - Repositórios processados
+# - PRs criados com links diretos
+# - Arquivos modificados por tipo
+# - Resumo de sucessos/falhas
+# - Links para revisar mudanças
 `
 
 	if _, err := os.Stat(configFile); err == nil {
 		log.Warn("config_already_exists").Str("file", configFile).Send()
 		log.Info("config_location").Str("file", configFile).Send()
 		log.Info("config_edit_tip").
-			Str("message", "Edite o arquivo para configurar seus registries").
+			Str("message", "Edite o arquivo para configurar seus registries e GitHub").
 			Send()
 		return nil
 	}
@@ -337,19 +408,16 @@ image_detection:
 		Str("message", "2. Configure seus registries de destino").
 		Send()
 	log.Info("config_next_steps").
-		Str("message", "3. Defina prioridades (priority: 0-100)").
+		Str("message", "3. Configure GitHub token e repositórios").
 		Send()
 	log.Info("config_next_steps").
-		Str("message", "4. Habilite os registries (enabled: true)").
+		Str("message", "4. Habilite GitOps (gitops.enabled: true)").
 		Send()
 	log.Info("config_next_steps").
-		Str("message", "5. Configure multiple_registries (true/false)").
+		Str("message", "5. Execute: privateer migrate cluster --dry-run").
 		Send()
 	log.Info("config_next_steps").
-		Str("message", "6. Configure Discord webhook (opcional)").
-		Send()
-	log.Info("config_next_steps").
-		Str("message", "7. Execute: privateer migrate cluster --dry-run").
+		Str("message", "6. Execute: privateer migrate github --dry-run").
 		Send()
 	log.Info("operation_completed").Str("operation", "init").Send()
 
