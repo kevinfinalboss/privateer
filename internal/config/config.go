@@ -42,9 +42,37 @@ func GetDefaultConfig() *types.Config {
 			Namespaces: []string{},
 		},
 		GitHub: types.GitHubConfig{
+			Enabled:      false,
 			Token:        "",
-			Organization: "",
-			Repositories: []string{},
+			Repositories: []types.GitHubRepositoryConfig{},
+		},
+		GitOps: types.GitOpsConfig{
+			Enabled:       false,
+			Strategy:      "smart_search",
+			AutoPR:        true,
+			BranchPrefix:  "privateer/migrate-",
+			CommitMessage: "🏴‍☠️ Migrate {image} to private registry",
+			SearchPatterns: []types.SearchPattern{
+				{
+					Pattern:     "image:\\s*([^\\s]+)",
+					FileTypes:   []string{"yaml", "yml"},
+					Description: "YAML image field",
+					Enabled:     true,
+				},
+				{
+					Pattern:     "repository:\\s*([^\\s]+)",
+					FileTypes:   []string{"yaml", "yml"},
+					Description: "Helm repository field",
+					Enabled:     true,
+				},
+			},
+			MappingRules: []types.RepositoryMapping{},
+			ValidationRules: types.ValidationConfig{
+				ValidateYAML:     true,
+				ValidateHelm:     false,
+				CheckImageExists: true,
+				DryRunKubernetes: false,
+			},
 		},
 		Settings: types.SettingsConfig{
 			Language:    "pt-BR",
@@ -56,6 +84,13 @@ func GetDefaultConfig() *types.Config {
 			CustomPublicRegistries:  []string{},
 			CustomPrivateRegistries: []string{},
 			IgnoreRegistries:        []string{"localhost", "127.0.0.1"},
+		},
+		Webhooks: types.WebhookConfig{
+			Discord: types.DiscordWebhookConfig{
+				Enabled: false,
+				URL:     "",
+				Name:    "Privateer 🏴‍☠️",
+			},
 		},
 	}
 
@@ -74,6 +109,56 @@ func applyDefaults(config *types.Config) {
 	}
 	if len(config.ImageDetection.IgnoreRegistries) == 0 {
 		config.ImageDetection.IgnoreRegistries = []string{"localhost", "127.0.0.1"}
+	}
+
+	if config.GitOps.Strategy == "" {
+		config.GitOps.Strategy = "smart_search"
+	}
+	if config.GitOps.BranchPrefix == "" {
+		config.GitOps.BranchPrefix = "privateer/migrate-"
+	}
+	if config.GitOps.CommitMessage == "" {
+		config.GitOps.CommitMessage = "🏴‍☠️ Migrate {image} to private registry"
+	}
+
+	if len(config.GitOps.SearchPatterns) == 0 {
+		config.GitOps.SearchPatterns = []types.SearchPattern{
+			{
+				Pattern:     "image:\\s*([^\\s]+)",
+				FileTypes:   []string{"yaml", "yml"},
+				Description: "YAML image field",
+				Enabled:     true,
+			},
+			{
+				Pattern:     "repository:\\s*([^\\s]+)",
+				FileTypes:   []string{"yaml", "yml"},
+				Description: "Helm repository field",
+				Enabled:     true,
+			},
+			{
+				Pattern:     "newName:\\s*([^\\s]+)",
+				FileTypes:   []string{"yaml", "yml"},
+				Description: "Kustomize newName field",
+				Enabled:     true,
+			},
+		}
+	}
+
+	if config.Webhooks.Discord.Name == "" {
+		config.Webhooks.Discord.Name = "Privateer 🏴‍☠️"
+	}
+
+	for i := range config.GitHub.Repositories {
+		repo := &config.GitHub.Repositories[i]
+		if repo.BranchStrategy == "" {
+			repo.BranchStrategy = "create_new"
+		}
+		if repo.PRSettings.CommitPrefix == "" {
+			repo.PRSettings.CommitPrefix = "🏴‍☠️ Privateer:"
+		}
+		if len(repo.PRSettings.Labels) == 0 {
+			repo.PRSettings.Labels = []string{"privateer", "security", "automated"}
+		}
 	}
 }
 
