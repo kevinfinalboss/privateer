@@ -76,7 +76,7 @@ func GetDefaultConfig() *types.Config {
 			},
 			TagResolution: types.TagResolutionConfig{
 				Enabled:              true,
-				AutoFillEmptyTags:    false,
+				AutoFillEmptyTags:    true,
 				PreferClusterTags:    true,
 				ConsiderLatestEmpty:  false,
 				FallbackTag:          "latest",
