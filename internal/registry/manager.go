@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -216,6 +217,190 @@ func (m *Manager) ValidateImageDuplication(ctx context.Context, targetImage stri
 	return nil
 }
 
+func (m *Manager) ValidateImagesBatch(ctx context.Context, images []*types.ImageInfo, config *types.Config) (map[string]string, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	m.logger.Info("validating_images_batch").
+		Int("images", len(images)).
+		Int("registries", len(m.registries)).
+		Send()
+
+	validatedMap := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	semaphore := make(chan struct{}, 10)
+
+	for _, image := range images {
+		wg.Add(1)
+		go func(img *types.ImageInfo) {
+			defer wg.Done()
+
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			for _, registry := range m.registries {
+				targetImage := m.generateTargetImageName(img, registry, config)
+
+				m.logger.Debug("batch_validating_image").
+					Str("public", img.Image).
+					Str("target", targetImage).
+					Str("registry", registry.GetName()).
+					Send()
+
+				exists, err := registry.HasImage(ctx, targetImage)
+				if err != nil {
+					m.logger.Warn("batch_validation_failed").
+						Str("image", targetImage).
+						Str("registry", registry.GetName()).
+						Err(err).
+						Send()
+					continue
+				}
+
+				if exists {
+					mu.Lock()
+					validatedMap[img.Image] = targetImage
+					mu.Unlock()
+
+					m.logger.Info("batch_image_validated").
+						Str("public", img.Image).
+						Str("private", targetImage).
+						Str("registry", registry.GetName()).
+						Send()
+					return
+				}
+			}
+
+			m.logger.Debug("batch_image_not_found").
+				Str("public_image", img.Image).
+				Send()
+		}(image)
+	}
+
+	wg.Wait()
+
+	m.logger.Info("batch_validation_completed").
+		Int("validated", len(validatedMap)).
+		Int("total", len(images)).
+		Send()
+
+	return validatedMap, nil
+}
+
+func (m *Manager) FindImageInRegistries(ctx context.Context, publicImage *types.ImageInfo, config *types.Config) (string, string, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	m.logger.Debug("finding_image_in_registries").
+		Str("public_image", publicImage.Image).
+		Send()
+
+	for _, registry := range m.registries {
+		targetImage := m.generateTargetImageName(publicImage, registry, config)
+
+		exists, err := registry.HasImage(ctx, targetImage)
+		if err != nil {
+			m.logger.Warn("registry_check_failed").
+				Str("registry", registry.GetName()).
+				Str("image", targetImage).
+				Err(err).
+				Send()
+			continue
+		}
+
+		if exists {
+			m.logger.Info("image_found_in_registry").
+				Str("public", publicImage.Image).
+				Str("private", targetImage).
+				Str("registry", registry.GetName()).
+				Send()
+			return targetImage, registry.GetName(), nil
+		}
+	}
+
+	return "", "", fmt.Errorf("imagem %s não encontrada em nenhum registry", publicImage.Image)
+}
+
+func (m *Manager) generateTargetImageName(image *types.ImageInfo, reg Registry, config *types.Config) string {
+	parsed := parseImageName(image.Image)
+	targetRepository := parsed.FullRepository
+	targetTag := parsed.Tag
+
+	if parsed.Digest != "" {
+		targetTag = fmt.Sprintf("%s@%s", targetTag, parsed.Digest)
+	}
+
+	switch reg.GetType() {
+	case "docker":
+		registryURL := m.getRegistryURL(reg.GetName(), config)
+		return fmt.Sprintf("%s/%s:%s", registryURL, targetRepository, targetTag)
+
+	case "harbor":
+		registryURL := m.getRegistryURL(reg.GetName(), config)
+		project := m.getHarborProject(reg.GetName(), config)
+		return fmt.Sprintf("%s/%s/%s:%s", registryURL, project, targetRepository, targetTag)
+
+	case "ecr":
+		ecrURL := m.getECRURL(reg.GetName(), config)
+		return fmt.Sprintf("%s/%s:%s", ecrURL, targetRepository, targetTag)
+
+	case "ghcr":
+		organization := m.getGHCROrganization(reg.GetName(), config)
+		return fmt.Sprintf("ghcr.io/%s/%s:%s", organization, targetRepository, targetTag)
+	}
+
+	return fmt.Sprintf("%s/%s:%s", reg.GetName(), targetRepository, targetTag)
+}
+
+func (m *Manager) getRegistryURL(registryName string, config *types.Config) string {
+	for _, regConfig := range config.Registries {
+		if regConfig.Name == registryName {
+			url := regConfig.URL
+			if strings.HasPrefix(url, "http://") {
+				url = strings.TrimPrefix(url, "http://")
+			} else if strings.HasPrefix(url, "https://") {
+				url = strings.TrimPrefix(url, "https://")
+			}
+			return url
+		}
+	}
+	return registryName
+}
+
+func (m *Manager) getHarborProject(registryName string, config *types.Config) string {
+	for _, regConfig := range config.Registries {
+		if regConfig.Name == registryName && regConfig.Project != "" {
+			return regConfig.Project
+		}
+	}
+	return "library"
+}
+
+func (m *Manager) getECRURL(registryName string, config *types.Config) string {
+	for _, regConfig := range config.Registries {
+		if regConfig.Name == registryName && regConfig.Type == "ecr" {
+			if regConfig.AccountID != "" {
+				return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", regConfig.AccountID, regConfig.Region)
+			}
+		}
+	}
+	return registryName
+}
+
+func (m *Manager) getGHCROrganization(registryName string, config *types.Config) string {
+	for _, regConfig := range config.Registries {
+		if regConfig.Name == registryName {
+			if regConfig.Project != "" {
+				return regConfig.Project
+			}
+			return regConfig.Username
+		}
+	}
+	return "unknown"
+}
+
 func (m *Manager) GetRegistryCount() int {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -231,4 +416,76 @@ func createHTTPClient(insecure bool) *http.Client {
 			},
 		},
 	}
+}
+
+type ParsedImage struct {
+	OriginalImage  string
+	Registry       string
+	Namespace      string
+	Repository     string
+	FullRepository string
+	Tag            string
+	Digest         string
+}
+
+func parseImageName(imageName string) *ParsedImage {
+	parsed := &ParsedImage{
+		OriginalImage: imageName,
+		Tag:           "latest",
+	}
+
+	workingImage := imageName
+
+	if strings.Contains(workingImage, "@") {
+		parts := strings.Split(workingImage, "@")
+		workingImage = parts[0]
+		parsed.Digest = parts[1]
+	}
+
+	if strings.Contains(workingImage, ":") {
+		parts := strings.Split(workingImage, ":")
+		workingImage = parts[0]
+		parsed.Tag = parts[1]
+	}
+
+	parts := strings.Split(workingImage, "/")
+
+	switch len(parts) {
+	case 1:
+		parsed.Registry = "docker.io"
+		parsed.Namespace = "library"
+		parsed.Repository = parts[0]
+		parsed.FullRepository = fmt.Sprintf("library/%s", parts[0])
+
+	case 2:
+		if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
+			parsed.Registry = parts[0]
+			parsed.Namespace = ""
+			parsed.Repository = parts[1]
+			parsed.FullRepository = parts[1]
+		} else {
+			parsed.Registry = "docker.io"
+			parsed.Namespace = parts[0]
+			parsed.Repository = parts[1]
+			parsed.FullRepository = fmt.Sprintf("%s/%s", parts[0], parts[1])
+		}
+
+	case 3:
+		parsed.Registry = parts[0]
+		parsed.Namespace = parts[1]
+		parsed.Repository = parts[2]
+		parsed.FullRepository = fmt.Sprintf("%s/%s", parts[1], parts[2])
+
+	default:
+		parsed.Registry = parts[0]
+		parsed.Repository = parts[len(parts)-1]
+		parsed.Namespace = strings.Join(parts[1:len(parts)-1], "/")
+		parsed.FullRepository = strings.Join(parts[1:], "/")
+	}
+
+	if parsed.Registry == "index.docker.io" || parsed.Registry == "registry-1.docker.io" {
+		parsed.Registry = "docker.io"
+	}
+
+	return parsed
 }
