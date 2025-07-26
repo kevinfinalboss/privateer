@@ -406,12 +406,14 @@ func (ir *ImageReplacer) validateReplacedContent(content string) error {
 		}
 	}
 
-	if strings.Count(content, "{") != strings.Count(content, "}") {
-		return fmt.Errorf("chaves desbalanceadas no conteúdo")
-	}
+	if ir.config.GitOps.ValidationRules.ValidateBrackets {
+		if strings.Count(content, "{") != strings.Count(content, "}") {
+			return fmt.Errorf("chaves desbalanceadas no conteúdo")
+		}
 
-	if strings.Count(content, "[") != strings.Count(content, "]") {
-		return fmt.Errorf("colchetes desbalanceados no conteúdo")
+		if strings.Count(content, "[") != strings.Count(content, "]") {
+			return fmt.Errorf("colchetes desbalanceados no conteúdo")
+		}
 	}
 
 	return nil
