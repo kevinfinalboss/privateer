@@ -14,35 +14,6 @@ type RepositoryManager struct {
 	client *Client
 }
 
-type CreateBranchRequest struct {
-	Ref string `json:"ref"`
-	SHA string `json:"sha"`
-}
-
-type UpdateFileRequest struct {
-	Message   string     `json:"message"`
-	Content   string     `json:"content"`
-	SHA       string     `json:"sha,omitempty"`
-	Branch    string     `json:"branch,omitempty"`
-	Committer *Committer `json:"committer,omitempty"`
-}
-
-type Committer struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
-type UpdateFileResponse struct {
-	Content struct {
-		SHA  string `json:"sha"`
-		Path string `json:"path"`
-	} `json:"content"`
-	Commit struct {
-		SHA     string `json:"sha"`
-		Message string `json:"message"`
-	} `json:"commit"`
-}
-
 func NewRepositoryManager(client *Client) *RepositoryManager {
 	return &RepositoryManager{
 		client: client,
@@ -74,7 +45,7 @@ func (rm *RepositoryManager) CreateBranch(ctx context.Context, owner, repo, bran
 	}
 
 	endpoint := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
-	payload := CreateBranchRequest{
+	payload := types.CreateBranchRequest{
 		Ref: "refs/heads/" + branchName,
 		SHA: baseSHA,
 	}
@@ -155,7 +126,7 @@ func (rm *RepositoryManager) GetDefaultBranch(ctx context.Context, owner, repo s
 	return repository.DefaultBranch, defaultSHA, nil
 }
 
-func (rm *RepositoryManager) UpdateFile(ctx context.Context, owner, repo, path, content, message, branch string) (*UpdateFileResponse, error) {
+func (rm *RepositoryManager) UpdateFile(ctx context.Context, owner, repo, path, content, message, branch string) (*types.UpdateFileResponse, error) {
 	rm.client.logger.Debug("github_update_file").
 		Str("owner", owner).
 		Str("repo", repo).
@@ -171,11 +142,11 @@ func (rm *RepositoryManager) UpdateFile(ctx context.Context, owner, repo, path, 
 
 	endpoint := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
 
-	payload := UpdateFileRequest{
+	payload := types.UpdateFileRequest{
 		Message: message,
 		Content: content,
 		Branch:  branch,
-		Committer: &Committer{
+		Committer: &types.Committer{
 			Name:  "Privateer Bot",
 			Email: "privateer@devops.local",
 		},
@@ -199,7 +170,7 @@ func (rm *RepositoryManager) UpdateFile(ctx context.Context, owner, repo, path, 
 		return nil, fmt.Errorf("falha ao atualizar arquivo: status %d", resp.StatusCode)
 	}
 
-	var updateResp UpdateFileResponse
+	var updateResp types.UpdateFileResponse
 	if err := json.Unmarshal(resp.Body, &updateResp); err != nil {
 		return nil, fmt.Errorf("falha ao decodificar resposta: %w", err)
 	}
@@ -212,7 +183,7 @@ func (rm *RepositoryManager) UpdateFile(ctx context.Context, owner, repo, path, 
 	return &updateResp, nil
 }
 
-func (rm *RepositoryManager) ListRepositoryFiles(ctx context.Context, repoConfig types.GitHubRepositoryConfig) ([]TreeEntry, error) {
+func (rm *RepositoryManager) ListRepositoryFiles(ctx context.Context, repoConfig types.GitHubRepositoryConfig) ([]types.TreeEntry, error) {
 	owner, repo, err := parseRepositoryName(repoConfig.Name)
 	if err != nil {
 		return nil, err
@@ -228,7 +199,7 @@ func (rm *RepositoryManager) ListRepositoryFiles(ctx context.Context, repoConfig
 		return nil, err
 	}
 
-	var relevantFiles []TreeEntry
+	var relevantFiles []types.TreeEntry
 	for _, entry := range tree.Tree {
 		if entry.Type != "blob" {
 			continue
@@ -327,8 +298,8 @@ func (rm *RepositoryManager) GenerateBranchName(prefix, imageInfo string) string
 	return fmt.Sprintf("%s%s-%s", prefix, cleanImage, timestamp)
 }
 
-func (rm *RepositoryManager) GetFilesByExtension(files []TreeEntry, extensions []string) []TreeEntry {
-	var filtered []TreeEntry
+func (rm *RepositoryManager) GetFilesByExtension(files []types.TreeEntry, extensions []string) []types.TreeEntry {
+	var filtered []types.TreeEntry
 
 	for _, file := range files {
 		for _, ext := range extensions {
