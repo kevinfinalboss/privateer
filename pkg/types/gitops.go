@@ -102,3 +102,13 @@ type ValidationConfig struct {
 	CheckImageExists bool `yaml:"check_image_exists"`
 	DryRunKubernetes bool `yaml:"dry_run_kubernetes"`
 }
+
+type TagResolutionResult struct {
+	OriginalTag   string
+	ResolvedTag   string
+	Source        string
+	Confidence    float64
+	WasResolved   bool
+	PrivateImage  string
+	ShouldReplace bool
+}
