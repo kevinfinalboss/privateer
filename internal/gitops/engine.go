@@ -24,12 +24,14 @@ type Engine struct {
 	config          *types.Config
 	replacer        *ImageReplacer
 	prManager       *PullRequestManager
+	tagResolver     *TagResolver
 }
 
 func NewEngine(githubClient *github.Client, registryManager *registry.Manager, logger *logger.Logger, config *types.Config) *Engine {
 	fileScanner := scanner.NewFileScanner(githubClient, logger, config)
 	replacer := NewImageReplacer(logger, config)
 	prManager := NewPullRequestManager(githubClient, logger, config)
+	tagResolver := NewTagResolver(logger, config, registryManager)
 
 	return &Engine{
 		githubClient:    githubClient,
@@ -39,6 +41,7 @@ func NewEngine(githubClient *github.Client, registryManager *registry.Manager, l
 		config:          config,
 		replacer:        replacer,
 		prManager:       prManager,
+		tagResolver:     tagResolver,
 	}
 }
 
@@ -48,6 +51,7 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 	e.logger.Info("gitops_migration_started").
 		Int("public_images", len(publicImages)).
 		Bool("dry_run", e.config.Settings.DryRun).
+		Bool("tag_resolution_enabled", e.config.GitOps.TagResolution.Enabled).
 		Send()
 
 	if !e.config.GitHub.Enabled {
@@ -65,6 +69,13 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 	enabledRepos := e.getEnabledRepositories()
 	if len(enabledRepos) == 0 {
 		return nil, fmt.Errorf("nenhum repositório GitHub habilitado encontrado")
+	}
+
+	if e.config.GitOps.TagResolution.Enabled {
+		e.tagResolver.LoadClusterImages(publicImages)
+		e.logger.Info("tag_resolver_loaded_with_cluster_images").
+			Int("cluster_images", len(publicImages)).
+			Send()
 	}
 
 	validatedImageMap, err := e.buildAndValidatePrivateImageMap(ctx, publicImages)
@@ -219,6 +230,21 @@ func (e *Engine) processRepository(ctx context.Context, repoConfig types.GitHubR
 	if err != nil {
 		result.Error = fmt.Errorf("falha no scan do repositório: %w", err)
 		return result
+	}
+
+	if e.config.GitOps.TagResolution.Enabled {
+		detections, err = e.tagResolver.ProcessDetections(ctx, detections)
+		if err != nil {
+			e.logger.Warn("tag_resolution_processing_failed").
+				Str("repository", repoConfig.Name).
+				Err(err).
+				Send()
+		} else {
+			e.logger.Info("tag_resolution_processing_completed").
+				Str("repository", repoConfig.Name).
+				Int("processed_detections", len(detections)).
+				Send()
+		}
 	}
 
 	if len(detections) == 0 {
