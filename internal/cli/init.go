@@ -228,8 +228,22 @@ gitops:
   validation:
     validate_yaml: true     # Validar sintaxe YAML após mudanças
     validate_helm: true     # Validar charts Helm se disponível
+    validate_brackets: false # Validar chaves {} e colchetes [] balanceados (pode causar problemas com Helm templates)
     check_image_exists: true # Verificar se imagem existe no registry privado
     dry_run_kubernetes: false # Fazer dry-run no Kubernetes (futuro)
+
+  tag_resolution:
+    enabled: true                    # Habilitar resolução de tags vazias
+    auto_fill_empty_tags: false      # Preencher automaticamente tags vazias nos values.yaml
+    prefer_cluster_tags: true        # Preferir tags encontradas no cluster vs registry
+    consider_latest_empty: false     # Considerar "latest" como tag vazia
+    fallback_tag: "latest"           # Tag padrão se não encontrar nenhuma
+    require_private_exists: true     # Só resolver se a imagem existir no registry privado
+    common_tags_to_try:              # Tags comuns para tentar quando não encontrar no cluster
+      - "latest"
+      - "stable" 
+      - "main"
+      - "v1"
 
 # Configurações gerais da aplicação
 settings:
