@@ -22,12 +22,6 @@ type KubernetesConfig struct {
 	Namespaces []string `yaml:"namespaces"`
 }
 
-type GitHubConfig struct {
-	Token        string   `yaml:"token"`
-	Organization string   `yaml:"organization"`
-	Repositories []string `yaml:"repositories"`
-}
-
 type WebhookConfig struct {
 	Discord DiscordWebhookConfig `yaml:"discord"`
 }
@@ -57,6 +51,7 @@ type Config struct {
 	Registries     []RegistryConfig     `yaml:"registries"`
 	Kubernetes     KubernetesConfig     `yaml:"kubernetes"`
 	GitHub         GitHubConfig         `yaml:"github"`
+	GitOps         GitOpsConfig         `yaml:"gitops"`
 	Settings       SettingsConfig       `yaml:"settings"`
 	ImageDetection ImageDetectionConfig `yaml:"image_detection"`
 	Webhooks       WebhookConfig        `yaml:"webhooks"`
@@ -79,4 +74,5 @@ type MigrationSummary struct {
 	SkippedCount int
 	Results      []*MigrationResult
 	Errors       []error
+	GitOps       *GitOpsSummary
 }
