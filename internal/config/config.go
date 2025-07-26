@@ -70,8 +70,18 @@ func GetDefaultConfig() *types.Config {
 			ValidationRules: types.ValidationConfig{
 				ValidateYAML:     true,
 				ValidateHelm:     false,
+				ValidateBrackets: false,
 				CheckImageExists: true,
 				DryRunKubernetes: false,
+			},
+			TagResolution: types.TagResolutionConfig{
+				Enabled:              true,
+				AutoFillEmptyTags:    false,
+				PreferClusterTags:    true,
+				ConsiderLatestEmpty:  false,
+				FallbackTag:          "latest",
+				RequirePrivateExists: true,
+				CommonTagsToTry:      []string{"latest", "stable", "main", "v1"},
 			},
 		},
 		Settings: types.SettingsConfig{
@@ -119,6 +129,12 @@ func applyDefaults(config *types.Config) {
 	}
 	if config.GitOps.CommitMessage == "" {
 		config.GitOps.CommitMessage = "🏴‍☠️ Migrate {image} to private registry"
+	}
+	if config.GitOps.TagResolution.FallbackTag == "" {
+		config.GitOps.TagResolution.FallbackTag = "latest"
+	}
+	if len(config.GitOps.TagResolution.CommonTagsToTry) == 0 {
+		config.GitOps.TagResolution.CommonTagsToTry = []string{"latest", "stable", "main", "v1"}
 	}
 
 	if len(config.GitOps.SearchPatterns) == 0 {
