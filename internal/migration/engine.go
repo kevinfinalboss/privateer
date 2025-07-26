@@ -65,12 +65,13 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 		return nil, err
 	}
 
-	e.logger.Info("migration_started").
+	e.logger.Info("migration_started_preserve_namespace").
 		Int("total_images", len(images)).
 		Int("target_registries", len(targetRegistries)).
 		Strs("registries", getRegistryNames(targetRegistries)).
 		Bool("multiple_registries", e.config.Settings.MultipleRegistries).
 		Int("concurrency", e.concurrency).
+		Str("strategy", "preserve_full_namespace").
 		Send()
 
 	if e.discordWebhook != nil {
@@ -178,7 +179,7 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 }
 
 func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageInfo, registryName string) *types.MigrationResult {
-	e.logger.Debug("migrating_image_to_registry").
+	e.logger.Debug("migrating_image_to_registry_preserve_namespace").
 		Str("image", image.Image).
 		Str("registry", registryName).
 		Str("namespace", image.Namespace).
@@ -199,7 +200,20 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
-	targetImage := e.generateTargetImageName(image, reg)
+	targetImage, err := e.generateTargetImageName(image, reg)
+	if err != nil {
+		e.logger.Error("target_image_generation_failed").
+			Str("image", image.Image).
+			Str("registry", registryName).
+			Err(err).
+			Send()
+		return &types.MigrationResult{
+			Image:    image,
+			Registry: registryName,
+			Success:  false,
+			Error:    err,
+		}
+	}
 
 	if err := e.registryManager.ValidateImageDuplication(ctx, targetImage); err != nil {
 		e.logger.Warn("image_duplication_detected").
@@ -247,7 +261,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
-	e.logger.Info("image_migrated").
+	e.logger.Info("image_migrated_preserve_namespace").
 		Str("source", image.Image).
 		Str("target", targetImage).
 		Str("registry", registryName).
@@ -259,6 +273,146 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		Registry:    registryName,
 		Success:     true,
 	}
+}
+
+func (e *Engine) generateTargetImageName(image *types.ImageInfo, reg registry.Registry) (string, error) {
+	parsed := e.parseImageName(image.Image)
+	targetRepository := parsed.FullRepository
+	targetTag := parsed.Tag
+
+	if parsed.Digest != "" {
+		targetTag = fmt.Sprintf("%s@%s", targetTag, parsed.Digest)
+	}
+
+	switch reg.GetType() {
+	case "docker":
+		registryURL := e.getRegistryURL(reg.GetName())
+		return fmt.Sprintf("%s/%s:%s", registryURL, targetRepository, targetTag), nil
+
+	case "harbor":
+		registryURL := e.getRegistryURL(reg.GetName())
+		project := e.getHarborProject(reg.GetName())
+		return fmt.Sprintf("%s/%s/%s:%s", registryURL, project, targetRepository, targetTag), nil
+
+	case "ecr":
+		ecrURL := e.getECRURL(reg.GetName())
+		return fmt.Sprintf("%s/%s:%s", ecrURL, targetRepository, targetTag), nil
+
+	case "ghcr":
+		organization := e.getGHCROrganization(reg.GetName())
+		return fmt.Sprintf("ghcr.io/%s/%s:%s", organization, targetRepository, targetTag), nil
+	}
+
+	return fmt.Sprintf("%s/%s:%s", reg.GetName(), targetRepository, targetTag), nil
+}
+
+func (e *Engine) parseImageName(imageName string) *ParsedImage {
+	parsed := &ParsedImage{
+		OriginalImage: imageName,
+		Tag:           "latest",
+	}
+
+	workingImage := imageName
+
+	if strings.Contains(workingImage, "@") {
+		parts := strings.Split(workingImage, "@")
+		workingImage = parts[0]
+		parsed.Digest = parts[1]
+	}
+
+	if strings.Contains(workingImage, ":") {
+		parts := strings.Split(workingImage, ":")
+		workingImage = parts[0]
+		parsed.Tag = parts[1]
+	}
+
+	parts := strings.Split(workingImage, "/")
+
+	switch len(parts) {
+	case 1:
+		parsed.Registry = "docker.io"
+		parsed.Namespace = "library"
+		parsed.Repository = parts[0]
+		parsed.FullRepository = fmt.Sprintf("library/%s", parts[0])
+
+	case 2:
+		if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
+			parsed.Registry = parts[0]
+			parsed.Namespace = ""
+			parsed.Repository = parts[1]
+			parsed.FullRepository = parts[1]
+		} else {
+			parsed.Registry = "docker.io"
+			parsed.Namespace = parts[0]
+			parsed.Repository = parts[1]
+			parsed.FullRepository = fmt.Sprintf("%s/%s", parts[0], parts[1])
+		}
+
+	case 3:
+		parsed.Registry = parts[0]
+		parsed.Namespace = parts[1]
+		parsed.Repository = parts[2]
+		parsed.FullRepository = fmt.Sprintf("%s/%s", parts[1], parts[2])
+
+	default:
+		parsed.Registry = parts[0]
+		parsed.Repository = parts[len(parts)-1]
+		parsed.Namespace = strings.Join(parts[1:len(parts)-1], "/")
+		parsed.FullRepository = strings.Join(parts[1:], "/")
+	}
+
+	if parsed.Registry == "index.docker.io" || parsed.Registry == "registry-1.docker.io" {
+		parsed.Registry = "docker.io"
+	}
+
+	return parsed
+}
+
+func (e *Engine) getRegistryURL(registryName string) string {
+	for _, regConfig := range e.config.Registries {
+		if regConfig.Name == registryName {
+			url := regConfig.URL
+			if strings.HasPrefix(url, "http://") {
+				url = strings.TrimPrefix(url, "http://")
+			} else if strings.HasPrefix(url, "https://") {
+				url = strings.TrimPrefix(url, "https://")
+			}
+			return url
+		}
+	}
+	return registryName
+}
+
+func (e *Engine) getHarborProject(registryName string) string {
+	for _, regConfig := range e.config.Registries {
+		if regConfig.Name == registryName && regConfig.Project != "" {
+			return regConfig.Project
+		}
+	}
+	return "library"
+}
+
+func (e *Engine) getECRURL(registryName string) string {
+	for _, regConfig := range e.config.Registries {
+		if regConfig.Name == registryName && regConfig.Type == "ecr" {
+			if regConfig.AccountID != "" {
+				return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", regConfig.AccountID, regConfig.Region)
+			}
+		}
+	}
+	return registryName
+}
+
+func (e *Engine) getGHCROrganization(registryName string) string {
+	for _, regConfig := range e.config.Registries {
+		if regConfig.Name == registryName {
+			if regConfig.Project != "" {
+				return regConfig.Project
+			}
+			return regConfig.Username
+		}
+	}
+	return "unknown"
 }
 
 func (e *Engine) selectTargetRegistries() []types.RegistryConfig {
@@ -306,101 +460,8 @@ func (e *Engine) updateSummaryCounters(summary *types.MigrationSummary, result *
 	}
 }
 
-func (e *Engine) generateTargetImageName(image *types.ImageInfo, reg registry.Registry) string {
-	parts := strings.Split(image.Image, "/")
-	imageName := parts[len(parts)-1]
-
-	if !strings.Contains(imageName, ":") {
-		imageName += ":latest"
-	}
-
-	switch reg.GetType() {
-	case "docker":
-		registryURL := e.getRegistryURL(reg.GetName())
-		return fmt.Sprintf("%s/%s", registryURL, imageName)
-	case "harbor":
-		registryURL := e.getRegistryURL(reg.GetName())
-		project := e.getHarborProject(reg.GetName())
-		return fmt.Sprintf("%s/%s/%s", registryURL, project, imageName)
-	case "ecr":
-		ecrURL := e.getECRURL(reg.GetName())
-		return fmt.Sprintf("%s/%s", ecrURL, imageName)
-	case "ghcr":
-		organization := e.getGHCROrganization(reg.GetName())
-		return fmt.Sprintf("ghcr.io/%s/%s", organization, imageName)
-	}
-
-	return fmt.Sprintf("%s/%s", reg.GetName(), imageName)
-}
-
-func (e *Engine) getRegistryURL(registryName string) string {
-	for _, regConfig := range e.config.Registries {
-		if regConfig.Name == registryName {
-			url := regConfig.URL
-			if strings.HasPrefix(url, "http://") {
-				url = strings.TrimPrefix(url, "http://")
-			} else if strings.HasPrefix(url, "https://") {
-				url = strings.TrimPrefix(url, "https://")
-			}
-			return url
-		}
-	}
-	return registryName
-}
-
-func (e *Engine) getHarborProject(registryName string) string {
-	for _, regConfig := range e.config.Registries {
-		if regConfig.Name == registryName && regConfig.Project != "" {
-			return regConfig.Project
-		}
-	}
-	return "library"
-}
-
-func (e *Engine) getECRURL(registryName string) string {
-	for _, regConfig := range e.config.Registries {
-		if regConfig.Name == registryName && regConfig.Type == "ecr" {
-			// Para ECR, precisamos garantir que o account_id esteja disponível
-			if regConfig.AccountID != "" {
-				return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", regConfig.AccountID, regConfig.Region)
-			}
-
-			// Se account_id não está na config, tenta descobrir do registry
-			reg, err := e.registryManager.GetRegistry(registryName)
-			if err == nil {
-				// Força login para descobrir account_id se necessário
-				ctx := context.Background()
-				if loginErr := reg.Login(ctx); loginErr == nil {
-					// Após login bem-sucedido, o account_id deve estar disponível
-					// Por enquanto, vamos usar um placeholder e deixar para descobrir na migração real
-					e.logger.Info("ecr_account_id_discovery").
-						Str("registry", registryName).
-						Str("message", "account_id será descoberto durante login do ECR").
-						Send()
-				}
-			}
-
-			// Retorna com placeholder que será resolvido durante a migração
-			return fmt.Sprintf("ACCOUNT_WILL_BE_DISCOVERED.dkr.ecr.%s.amazonaws.com", regConfig.Region)
-		}
-	}
-	return registryName
-}
-
-func (e *Engine) getGHCROrganization(registryName string) string {
-	for _, regConfig := range e.config.Registries {
-		if regConfig.Name == registryName {
-			if regConfig.Project != "" {
-				return regConfig.Project
-			}
-			return regConfig.Username
-		}
-	}
-	return "unknown"
-}
-
 func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []types.RegistryConfig) *types.MigrationSummary {
-	e.logger.Info("dry_run_migration").
+	e.logger.Info("dry_run_migration_preserve_namespace").
 		Int("total_images", len(images)).
 		Int("target_registries", len(targetRegistries)).
 		Send()
@@ -430,9 +491,16 @@ func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []t
 					continue
 				}
 
-				targetImage := e.generateTargetImageName(image, reg)
+				targetImage, err := e.generateTargetImageName(image, reg)
+				if err != nil {
+					e.logger.Error("target_image_generation_failed_dry_run").
+						Str("registry", regConfig.Name).
+						Err(err).
+						Send()
+					continue
+				}
 
-				e.logger.Info("dry_run_would_migrate").
+				e.logger.Info("dry_run_would_migrate_preserve_namespace").
 					Str("source", image.Image).
 					Str("target", targetImage).
 					Str("registry", regConfig.Name).
@@ -456,9 +524,16 @@ func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []t
 				continue
 			}
 
-			targetImage := e.generateTargetImageName(image, reg)
+			targetImage, err := e.generateTargetImageName(image, reg)
+			if err != nil {
+				e.logger.Error("target_image_generation_failed_dry_run").
+					Str("registry", targetRegistries[0].Name).
+					Err(err).
+					Send()
+				continue
+			}
 
-			e.logger.Info("dry_run_would_migrate").
+			e.logger.Info("dry_run_would_migrate_preserve_namespace").
 				Str("source", image.Image).
 				Str("target", targetImage).
 				Str("registry", targetRegistries[0].Name).
@@ -476,6 +551,16 @@ func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []t
 	}
 
 	return summary
+}
+
+type ParsedImage struct {
+	OriginalImage  string
+	Registry       string
+	Namespace      string
+	Repository     string
+	FullRepository string
+	Tag            string
+	Digest         string
 }
 
 func getRegistryNames(registries []types.RegistryConfig) []string {
