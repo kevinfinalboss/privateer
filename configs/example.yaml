@@ -3,9 +3,9 @@ registries:
   # Registry Docker simples (como registry:2)
   - name: "my-docker-registry"
     type: "docker"
-    url: "registry.kevindev.com.br"
-    username: "kgomes-adm"
-    password: "cnKR0[02Pk%^"
+    url: "registryurl.com"
+    username: "userchange"
+    password: "change-me!"
     insecure: false
     
   # Harbor registry
