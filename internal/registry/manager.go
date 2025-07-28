@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -488,4 +489,45 @@ func parseImageName(imageName string) *ParsedImage {
 	}
 
 	return parsed
+}
+
+func (m *Manager) RemoveLocalImage(ctx context.Context, imageName string) error {
+	m.logger.Debug("starting_local_image_removal").
+		Str("image", imageName).
+		Send()
+
+	cmd := exec.CommandContext(ctx, "docker", "rmi", imageName)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "No such image") {
+			m.logger.Debug("image_not_found_locally").
+				Str("image", imageName).
+				Str("output", string(output)).
+				Send()
+			return nil
+		}
+
+		if strings.Contains(string(output), "image is being used by running container") {
+			m.logger.Warn("image_in_use_by_container").
+				Str("image", imageName).
+				Str("output", string(output)).
+				Send()
+			return fmt.Errorf("imagem %s está sendo usada por um container em execução", imageName)
+		}
+
+		m.logger.Error("docker_rmi_command_failed").
+			Str("image", imageName).
+			Str("output", string(output)).
+			Err(err).
+			Send()
+		return fmt.Errorf("falha ao executar docker rmi para %s: %w", imageName, err)
+	}
+
+	m.logger.Debug("local_image_removed_successfully").
+		Str("image", imageName).
+		Str("docker_output", string(output)).
+		Send()
+
+	return nil
 }
