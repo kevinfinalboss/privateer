@@ -63,6 +63,8 @@ func (ir *ImageReplacer) replaceImageInContent(content string, replacement types
 	switch replacement.FileType {
 	case "helm_separated":
 		return ir.replaceHelmSeparatedPrecise(content, replacement)
+	case "helm_combined":
+		return ir.replaceHelmCombined(content, replacement)
 	case "kustomize":
 		return ir.replaceKustomize(content, replacement)
 	case "kubernetes_manifest":
@@ -183,6 +185,75 @@ func (ir *ImageReplacer) replaceHelmSeparatedPrecise(content string, replacement
 
 	if modified {
 		ir.logger.Info("helm_separated_precise_replacement_completed").
+			Bool("modified", true).
+			Send()
+		return strings.Join(lines, "\n"), true, nil
+	}
+
+	return content, false, nil
+}
+
+func (ir *ImageReplacer) replaceHelmCombined(content string, replacement types.ImageReplacement) (string, bool, error) {
+	sourceImage := replacement.SourceImage
+	targetImage := replacement.TargetImage
+
+	sourceParsed := utils.ParseImageName(sourceImage)
+	targetParsed := utils.ParseImageName(targetImage)
+
+	ir.logger.Debug("helm_combined_replacement").
+		Str("source_image", sourceImage).
+		Str("target_image", targetImage).
+		Str("source_combined_repo", fmt.Sprintf("%s/%s", sourceParsed.Registry, sourceParsed.FullRepository)).
+		Str("target_combined_repo", fmt.Sprintf("%s/%s", targetParsed.Registry, targetParsed.FullRepository)).
+		Send()
+
+	lines := strings.Split(content, "\n")
+	modified := false
+
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		if strings.Contains(trimmedLine, "repository:") {
+			sourceCombinedRepo := fmt.Sprintf("%s/%s", sourceParsed.Registry, sourceParsed.FullRepository)
+			if sourceParsed.Registry == "docker.io" {
+				sourceCombinedRepo = sourceParsed.FullRepository
+			}
+
+			repoPattern := fmt.Sprintf(`(\s*repository:\s*["']?)%s(["']?\s*)`, regexp.QuoteMeta(sourceCombinedRepo))
+			re := regexp.MustCompile(repoPattern)
+			if re.MatchString(line) {
+				targetCombinedRepo := fmt.Sprintf("%s/%s", targetParsed.Registry, targetParsed.FullRepository)
+				if targetParsed.Registry == "docker.io" {
+					targetCombinedRepo = targetParsed.FullRepository
+				}
+
+				lines[i] = re.ReplaceAllString(line, "${1}"+targetCombinedRepo+"${2}")
+				modified = true
+				ir.logger.Info("helm_combined_repository_replaced").
+					Str("old", sourceCombinedRepo).
+					Str("new", targetCombinedRepo).
+					Int("line", i+1).
+					Send()
+			}
+		}
+
+		if strings.Contains(trimmedLine, "tag:") && sourceParsed.Tag != targetParsed.Tag {
+			tagPattern := fmt.Sprintf(`(\s*tag:\s*["']?)%s(["']?\s*)`, regexp.QuoteMeta(sourceParsed.Tag))
+			re := regexp.MustCompile(tagPattern)
+			if re.MatchString(line) {
+				lines[i] = re.ReplaceAllString(line, "${1}"+targetParsed.Tag+"${2}")
+				modified = true
+				ir.logger.Info("helm_combined_tag_replaced").
+					Str("old", sourceParsed.Tag).
+					Str("new", targetParsed.Tag).
+					Int("line", i+1).
+					Send()
+			}
+		}
+	}
+
+	if modified {
+		ir.logger.Info("helm_combined_replacement_completed").
 			Bool("modified", true).
 			Send()
 		return strings.Join(lines, "\n"), true, nil
