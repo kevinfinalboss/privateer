@@ -230,7 +230,6 @@ func (fs *FileScanner) scanHelmValues(content, filePath string, publicImageMap m
 
 		if strings.HasPrefix(trimmedLine, "image:") {
 			inImageSection = true
-
 			currentRegistry = ""
 			currentRepository = ""
 			currentTag = ""
@@ -275,20 +274,34 @@ func (fs *FileScanner) scanHelmValues(content, filePath string, publicImageMap m
 				Send()
 		}
 
-		if currentRegistry != "" && currentRepository != "" && currentTag != "" {
+		if (currentRegistry != "" && currentRepository != "" && currentTag != "") ||
+			(currentRepository != "" && currentTag != "" && fs.repositoryContainsRegistry(currentRepository)) {
+
+			var detectedRegistry, detectedRepository, fullImage string
+			var fileType string
+
+			if currentRegistry != "" {
+				detectedRegistry = currentRegistry
+				detectedRepository = currentRepository
+				fileType = "helm_separated"
+			} else {
+				detectedRegistry = fs.extractRegistryFromRepository(currentRepository)
+				detectedRepository = fs.extractRepositoryFromCombined(currentRepository)
+				fileType = "helm_combined"
+			}
+
 			fs.logger.Debug("helm_complete_image_found").
-				Str("registry", currentRegistry).
-				Str("repository", currentRepository).
+				Str("detected_registry", detectedRegistry).
+				Str("detected_repository", detectedRepository).
 				Str("tag", currentTag).
+				Str("file_type", fileType).
 				Send()
 
-			if utils.IsPublicRegistry(currentRegistry) {
-
-				var fullImage string
-				if currentRegistry == "docker.io" {
-					fullImage = utils.BuildDockerIOImageName(currentRepository, currentTag)
+			if utils.IsPublicRegistry(detectedRegistry) {
+				if detectedRegistry == "docker.io" {
+					fullImage = utils.BuildDockerIOImageName(detectedRepository, currentTag)
 				} else {
-					fullImage = utils.BuildFullImageName(currentRegistry, currentRepository, currentTag)
+					fullImage = utils.BuildFullImageName(detectedRegistry, detectedRepository, currentTag)
 				}
 
 				fs.logger.Debug("checking_public_image").
@@ -301,21 +314,22 @@ func (fs *FileScanner) scanHelmValues(content, filePath string, publicImageMap m
 						Image:      fullImage,
 						Repository: utils.ExtractRepository(fullImage),
 						Tag:        currentTag,
-						Registry:   currentRegistry,
+						Registry:   detectedRegistry,
 						FullImage:  fullImage,
 						IsPublic:   true,
 						LineNumber: repoLine,
-						Context:    fmt.Sprintf("registry: %s, repository: %s, tag: %s", currentRegistry, currentRepository, currentTag),
+						Context:    fs.buildHelmContext(currentRegistry, currentRepository, currentTag, fileType),
 						Confidence: 0.95,
 						FilePath:   filePath,
 					}
 
 					detections = append(detections, detection)
 
-					fs.logger.Info("helm_separated_image_detected").
+					fs.logger.Info("helm_image_detected").
 						Str("file", filePath).
-						Str("registry", currentRegistry).
-						Str("repository", currentRepository).
+						Str("type", fileType).
+						Str("registry", detectedRegistry).
+						Str("repository", detectedRepository).
 						Str("tag", currentTag).
 						Str("full_image", fullImage).
 						Int("registry_line", registryLine).
@@ -329,7 +343,7 @@ func (fs *FileScanner) scanHelmValues(content, filePath string, publicImageMap m
 				}
 			} else {
 				fs.logger.Debug("private_registry_detected").
-					Str("registry", currentRegistry).
+					Str("registry", detectedRegistry).
 					Send()
 			}
 
@@ -343,6 +357,36 @@ func (fs *FileScanner) scanHelmValues(content, filePath string, publicImageMap m
 	detections = append(detections, inlineDetections...)
 
 	return detections
+}
+
+func (fs *FileScanner) repositoryContainsRegistry(repository string) bool {
+	parts := strings.Split(repository, "/")
+	if len(parts) >= 2 && strings.Contains(parts[0], ".") {
+		return true
+	}
+	return false
+}
+
+func (fs *FileScanner) extractRegistryFromRepository(repository string) string {
+	if fs.repositoryContainsRegistry(repository) {
+		return strings.Split(repository, "/")[0]
+	}
+	return "docker.io"
+}
+
+func (fs *FileScanner) extractRepositoryFromCombined(repository string) string {
+	if fs.repositoryContainsRegistry(repository) {
+		parts := strings.Split(repository, "/")
+		return strings.Join(parts[1:], "/")
+	}
+	return repository
+}
+
+func (fs *FileScanner) buildHelmContext(registry, repository, tag, fileType string) string {
+	if fileType == "helm_separated" {
+		return fmt.Sprintf("registry: %s, repository: %s, tag: %s", registry, repository, tag)
+	}
+	return fmt.Sprintf("repository: %s, tag: %s (combined)", repository, tag)
 }
 
 func (fs *FileScanner) scanArgoCDApplication(content, filePath string, publicImageMap map[string]*types.ImageInfo) []types.ImageDetectionResult {
