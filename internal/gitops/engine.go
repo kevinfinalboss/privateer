@@ -554,8 +554,10 @@ func (e *Engine) groupValidatedReplacementsByFile(validatedReplacements []types.
 func (e *Engine) detectReplacementType(context string) string {
 	context = strings.ToLower(context)
 
-	if strings.Contains(context, "repository:") && strings.Contains(context, "tag:") {
+	if strings.Contains(context, "registry:") && strings.Contains(context, "repository:") && strings.Contains(context, "tag:") {
 		return "helm_separated"
+	} else if strings.Contains(context, "repository:") && strings.Contains(context, "tag:") && strings.Contains(context, "(combined)") {
+		return "helm_combined"
 	} else if strings.Contains(context, "newname:") {
 		return "kustomize"
 	} else if strings.Contains(context, "image:") {
