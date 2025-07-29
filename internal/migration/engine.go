@@ -53,6 +53,23 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 		return &types.MigrationSummary{}, nil
 	}
 
+	e.logger.Debug("migration_input_analysis").
+		Int("total_input_images", len(images)).
+		Send()
+
+	for i, img := range images {
+		e.logger.Debug("input_image_details").
+			Int("index", i).
+			Str("image", img.Image).
+			Str("namespace", img.Namespace).
+			Str("resource_name", img.ResourceName).
+			Str("resource_type", img.ResourceType).
+			Bool("is_public", img.IsPublic).
+			Bool("is_init_container", img.IsInitContainer).
+			Str("container", img.Container).
+			Send()
+	}
+
 	targetRegistries := e.selectTargetRegistries()
 	if len(targetRegistries) == 0 {
 		err := fmt.Errorf("nenhum registry habilitado encontrado")
@@ -114,11 +131,22 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 	var mu sync.Mutex
 
 	for _, image := range images {
+		e.logger.Debug("processing_image_for_migration").
+			Str("image", image.Image).
+			Str("namespace", image.Namespace).
+			Bool("multiple_registries", e.config.Settings.MultipleRegistries).
+			Send()
+
 		if e.config.Settings.MultipleRegistries {
 			for _, regConfig := range targetRegistries {
 				wg.Add(1)
 				go func(img *types.ImageInfo, regCfg types.RegistryConfig) {
 					defer wg.Done()
+
+					e.logger.Debug("starting_goroutine_for_multiple_registries").
+						Str("image", img.Image).
+						Str("registry", regCfg.Name).
+						Send()
 
 					semaphore <- struct{}{}
 					defer func() { <-semaphore }()
@@ -135,6 +163,11 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 			wg.Add(1)
 			go func(img *types.ImageInfo) {
 				defer wg.Done()
+
+				e.logger.Debug("starting_goroutine_for_single_registry").
+					Str("image", img.Image).
+					Str("registry", targetRegistries[0].Name).
+					Send()
 
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
@@ -179,7 +212,7 @@ func (e *Engine) MigrateImages(ctx context.Context, images []*types.ImageInfo) (
 }
 
 func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageInfo, registryName string) *types.MigrationResult {
-	e.logger.Debug("migrating_image_to_registry_preserve_namespace").
+	e.logger.Debug("starting_image_migration").
 		Str("image", image.Image).
 		Str("registry", registryName).
 		Str("namespace", image.Namespace).
@@ -190,6 +223,7 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 	if err != nil {
 		e.logger.Error("registry_not_found").
 			Str("registry", registryName).
+			Str("image", image.Image).
 			Err(err).
 			Send()
 		return &types.MigrationResult{
@@ -199,6 +233,12 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 			Error:    err,
 		}
 	}
+
+	e.logger.Debug("registry_found_successfully").
+		Str("registry", registryName).
+		Str("registry_type", reg.GetType()).
+		Str("image", image.Image).
+		Send()
 
 	targetImage, err := e.generateTargetImageName(image, reg)
 	if err != nil {
@@ -215,10 +255,25 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
+	e.logger.Debug("target_image_generated").
+		Str("source_image", image.Image).
+		Str("target_image", targetImage).
+		Str("registry", registryName).
+		Send()
+
+	e.logger.Debug("checking_image_duplication").
+		Str("target_image", targetImage).
+		Str("registry", registryName).
+		Send()
+
 	if err := e.registryManager.ValidateImageDuplication(ctx, targetImage); err != nil {
 		e.logger.Warn("image_duplication_detected").
-			Str("image", targetImage).
+			Str("source_image", image.Image).
+			Str("target_image", targetImage).
 			Str("registry", registryName).
+			Str("namespace", image.Namespace).
+			Str("resource", image.ResourceName).
+			Str("skip_reason", "Imagem já existe no registry").
 			Err(err).
 			Send()
 		return &types.MigrationResult{
@@ -232,9 +287,19 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
+	e.logger.Debug("image_duplication_check_passed").
+		Str("target_image", targetImage).
+		Str("registry", registryName).
+		Send()
+
+	e.logger.Debug("attempting_registry_login").
+		Str("registry", registryName).
+		Send()
+
 	if err := reg.Login(ctx); err != nil {
 		e.logger.Error("registry_login_failed").
 			Str("registry", registryName).
+			Str("image", image.Image).
 			Err(err).
 			Send()
 		return &types.MigrationResult{
@@ -245,11 +310,23 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
+	e.logger.Debug("registry_login_successful").
+		Str("registry", registryName).
+		Send()
+
+	e.logger.Info("starting_image_copy").
+		Str("source", image.Image).
+		Str("target", targetImage).
+		Str("registry", registryName).
+		Str("namespace", image.Namespace).
+		Send()
+
 	if err := reg.Copy(ctx, image.Image, targetImage); err != nil {
 		e.logger.Error("image_copy_failed").
 			Str("source", image.Image).
 			Str("target", targetImage).
 			Str("registry", registryName).
+			Str("namespace", image.Namespace).
 			Err(err).
 			Send()
 		return &types.MigrationResult{
@@ -261,10 +338,33 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 		}
 	}
 
+	e.logger.Info("image_copy_successful").
+		Str("source", image.Image).
+		Str("target", targetImage).
+		Str("registry", registryName).
+		Str("namespace", image.Namespace).
+		Send()
+
+	e.logger.Debug("starting_local_image_cleanup").
+		Str("source_image", image.Image).
+		Send()
+
+	if err := e.cleanupLocalImage(ctx, image.Image); err != nil {
+		e.logger.Warn("local_image_cleanup_failed").
+			Str("image", image.Image).
+			Err(err).
+			Send()
+	} else {
+		e.logger.Info("local_image_cleanup_successful").
+			Str("image", image.Image).
+			Send()
+	}
+
 	e.logger.Info("image_migrated_preserve_namespace").
 		Str("source", image.Image).
 		Str("target", targetImage).
 		Str("registry", registryName).
+		Str("namespace", image.Namespace).
 		Send()
 
 	return &types.MigrationResult{
@@ -275,97 +375,109 @@ func (e *Engine) migrateImageToRegistry(ctx context.Context, image *types.ImageI
 	}
 }
 
+func (e *Engine) cleanupLocalImage(ctx context.Context, imageName string) error {
+	e.logger.Debug("executing_local_image_removal").
+		Str("image", imageName).
+		Send()
+
+	if err := e.registryManager.RemoveLocalImage(ctx, imageName); err != nil {
+		e.logger.Error("local_image_removal_failed").
+			Str("image", imageName).
+			Err(err).
+			Send()
+		return fmt.Errorf("falha ao remover imagem local %s: %w", imageName, err)
+	}
+
+	e.logger.Debug("local_image_removal_completed").
+		Str("image", imageName).
+		Send()
+
+	return nil
+}
+
 func (e *Engine) generateTargetImageName(image *types.ImageInfo, reg registry.Registry) (string, error) {
-	parsed := e.parseImageName(image.Image)
+	e.logger.Debug("parsing_image_name").
+		Str("image", image.Image).
+		Str("registry_type", reg.GetType()).
+		Send()
+
+	parsed := types.ParseImageName(image.Image)
+
+	e.logger.Debug("image_parsing_result").
+		Str("original_image", parsed.OriginalImage).
+		Str("registry", parsed.Registry).
+		Str("namespace", parsed.Namespace).
+		Str("repository", parsed.Repository).
+		Str("full_repository", parsed.FullRepository).
+		Str("tag", parsed.Tag).
+		Str("digest", parsed.Digest).
+		Send()
+
 	targetRepository := parsed.FullRepository
 	targetTag := parsed.Tag
 
 	if parsed.Digest != "" {
 		targetTag = fmt.Sprintf("%s@%s", targetTag, parsed.Digest)
+		e.logger.Debug("digest_detected_in_target").
+			Str("target_tag", targetTag).
+			Send()
 	}
+
+	var targetImage string
+	var err error
 
 	switch reg.GetType() {
 	case "docker":
 		registryURL := e.getRegistryURL(reg.GetName())
-		return fmt.Sprintf("%s/%s:%s", registryURL, targetRepository, targetTag), nil
+		targetImage = fmt.Sprintf("%s/%s:%s", registryURL, targetRepository, targetTag)
+		e.logger.Debug("docker_target_image_generated").
+			Str("registry_url", registryURL).
+			Str("target_image", targetImage).
+			Send()
 
 	case "harbor":
 		registryURL := e.getRegistryURL(reg.GetName())
 		project := e.getHarborProject(reg.GetName())
-		return fmt.Sprintf("%s/%s/%s:%s", registryURL, project, targetRepository, targetTag), nil
+		targetImage = fmt.Sprintf("%s/%s/%s:%s", registryURL, project, targetRepository, targetTag)
+		e.logger.Debug("harbor_target_image_generated").
+			Str("registry_url", registryURL).
+			Str("project", project).
+			Str("target_image", targetImage).
+			Send()
 
 	case "ecr":
 		ecrURL := e.getECRURL(reg.GetName())
-		return fmt.Sprintf("%s/%s:%s", ecrURL, targetRepository, targetTag), nil
+		targetImage = fmt.Sprintf("%s/%s:%s", ecrURL, targetRepository, targetTag)
+		e.logger.Debug("ecr_target_image_generated").
+			Str("ecr_url", ecrURL).
+			Str("target_image", targetImage).
+			Send()
 
 	case "ghcr":
 		organization := e.getGHCROrganization(reg.GetName())
-		return fmt.Sprintf("ghcr.io/%s/%s:%s", organization, targetRepository, targetTag), nil
-	}
-
-	return fmt.Sprintf("%s/%s:%s", reg.GetName(), targetRepository, targetTag), nil
-}
-
-func (e *Engine) parseImageName(imageName string) *ParsedImage {
-	parsed := &ParsedImage{
-		OriginalImage: imageName,
-		Tag:           "latest",
-	}
-
-	workingImage := imageName
-
-	if strings.Contains(workingImage, "@") {
-		parts := strings.Split(workingImage, "@")
-		workingImage = parts[0]
-		parsed.Digest = parts[1]
-	}
-
-	if strings.Contains(workingImage, ":") {
-		parts := strings.Split(workingImage, ":")
-		workingImage = parts[0]
-		parsed.Tag = parts[1]
-	}
-
-	parts := strings.Split(workingImage, "/")
-
-	switch len(parts) {
-	case 1:
-		parsed.Registry = "docker.io"
-		parsed.Namespace = "library"
-		parsed.Repository = parts[0]
-		parsed.FullRepository = fmt.Sprintf("library/%s", parts[0])
-
-	case 2:
-		if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
-			parsed.Registry = parts[0]
-			parsed.Namespace = ""
-			parsed.Repository = parts[1]
-			parsed.FullRepository = parts[1]
-		} else {
-			parsed.Registry = "docker.io"
-			parsed.Namespace = parts[0]
-			parsed.Repository = parts[1]
-			parsed.FullRepository = fmt.Sprintf("%s/%s", parts[0], parts[1])
-		}
-
-	case 3:
-		parsed.Registry = parts[0]
-		parsed.Namespace = parts[1]
-		parsed.Repository = parts[2]
-		parsed.FullRepository = fmt.Sprintf("%s/%s", parts[1], parts[2])
+		targetImage = fmt.Sprintf("ghcr.io/%s/%s:%s", organization, targetRepository, targetTag)
+		e.logger.Debug("ghcr_target_image_generated").
+			Str("organization", organization).
+			Str("target_image", targetImage).
+			Send()
 
 	default:
-		parsed.Registry = parts[0]
-		parsed.Repository = parts[len(parts)-1]
-		parsed.Namespace = strings.Join(parts[1:len(parts)-1], "/")
-		parsed.FullRepository = strings.Join(parts[1:], "/")
+		targetImage = fmt.Sprintf("%s/%s:%s", reg.GetName(), targetRepository, targetTag)
+		e.logger.Debug("default_target_image_generated").
+			Str("target_image", targetImage).
+			Send()
 	}
 
-	if parsed.Registry == "index.docker.io" || parsed.Registry == "registry-1.docker.io" {
-		parsed.Registry = "docker.io"
+	if targetImage == "" {
+		err = fmt.Errorf("falha ao gerar nome da imagem de destino para %s", image.Image)
+		e.logger.Error("target_image_generation_empty").
+			Str("source_image", image.Image).
+			Str("registry_type", reg.GetType()).
+			Send()
+		return "", err
 	}
 
-	return parsed
+	return targetImage, nil
 }
 
 func (e *Engine) getRegistryURL(registryName string) string {
@@ -418,13 +530,34 @@ func (e *Engine) getGHCROrganization(registryName string) string {
 func (e *Engine) selectTargetRegistries() []types.RegistryConfig {
 	var enabledRegistries []types.RegistryConfig
 
-	for _, regConfig := range e.config.Registries {
+	e.logger.Debug("selecting_target_registries").
+		Int("total_registries", len(e.config.Registries)).
+		Send()
+
+	for i, regConfig := range e.config.Registries {
+		e.logger.Debug("checking_registry_config").
+			Int("index", i).
+			Str("name", regConfig.Name).
+			Str("type", regConfig.Type).
+			Bool("enabled", regConfig.Enabled).
+			Int("priority", regConfig.Priority).
+			Send()
+
 		if regConfig.Enabled {
 			enabledRegistries = append(enabledRegistries, regConfig)
+			e.logger.Debug("registry_added_to_enabled_list").
+				Str("name", regConfig.Name).
+				Int("priority", regConfig.Priority).
+				Send()
 		}
 	}
 
+	e.logger.Debug("enabled_registries_summary").
+		Int("enabled_count", len(enabledRegistries)).
+		Send()
+
 	if len(enabledRegistries) == 0 {
+		e.logger.Error("no_enabled_registries_found").Send()
 		return []types.RegistryConfig{}
 	}
 
@@ -450,10 +583,23 @@ func (e *Engine) selectTargetRegistries() []types.RegistryConfig {
 func (e *Engine) updateSummaryCounters(summary *types.MigrationSummary, result *types.MigrationResult) {
 	if result.Success {
 		summary.SuccessCount++
+		e.logger.Debug("summary_counter_updated").
+			Str("type", "success").
+			Int("new_count", summary.SuccessCount).
+			Send()
 	} else if result.Skipped {
 		summary.SkippedCount++
+		e.logger.Debug("summary_counter_updated").
+			Str("type", "skipped").
+			Int("new_count", summary.SkippedCount).
+			Str("reason", result.Reason).
+			Send()
 	} else {
 		summary.FailureCount++
+		e.logger.Debug("summary_counter_updated").
+			Str("type", "failure").
+			Int("new_count", summary.FailureCount).
+			Send()
 		if result.Error != nil {
 			summary.Errors = append(summary.Errors, result.Error)
 		}
@@ -551,16 +697,6 @@ func (e *Engine) dryRunMigration(images []*types.ImageInfo, targetRegistries []t
 	}
 
 	return summary
-}
-
-type ParsedImage struct {
-	OriginalImage  string
-	Registry       string
-	Namespace      string
-	Repository     string
-	FullRepository string
-	Tag            string
-	Digest         string
 }
 
 func getRegistryNames(registries []types.RegistryConfig) []string {
