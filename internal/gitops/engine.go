@@ -13,6 +13,7 @@ import (
 	"github.com/kevinfinalboss/privateer/internal/logger"
 	"github.com/kevinfinalboss/privateer/internal/registry"
 	"github.com/kevinfinalboss/privateer/internal/scanner"
+	"github.com/kevinfinalboss/privateer/internal/webhook"
 	"github.com/kevinfinalboss/privateer/pkg/types"
 )
 
@@ -25,6 +26,7 @@ type Engine struct {
 	replacer        *ImageReplacer
 	prManager       *PullRequestManager
 	tagResolver     *TagResolver
+	discordWebhook  *webhook.DiscordWebhook
 }
 
 func NewEngine(githubClient *github.Client, registryManager *registry.Manager, logger *logger.Logger, config *types.Config) *Engine {
@@ -33,7 +35,7 @@ func NewEngine(githubClient *github.Client, registryManager *registry.Manager, l
 	prManager := NewPullRequestManager(githubClient, logger, config)
 	tagResolver := NewTagResolver(logger, config, registryManager)
 
-	return &Engine{
+	engine := &Engine{
 		githubClient:    githubClient,
 		registryManager: registryManager,
 		fileScanner:     fileScanner,
@@ -43,6 +45,15 @@ func NewEngine(githubClient *github.Client, registryManager *registry.Manager, l
 		prManager:       prManager,
 		tagResolver:     tagResolver,
 	}
+
+	if config.Webhooks.Discord.Enabled && config.Webhooks.Discord.URL != "" {
+		engine.discordWebhook = webhook.NewDiscordWebhook(config.Webhooks.Discord, logger)
+		logger.Info("discord_webhook_enabled_gitops").
+			Str("url", maskWebhookURL(config.Webhooks.Discord.URL)).
+			Send()
+	}
+
+	return engine
 }
 
 func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.ImageInfo) (*types.GitOpsSummary, error) {
@@ -55,20 +66,43 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 		Send()
 
 	if !e.config.GitHub.Enabled {
-		return nil, fmt.Errorf("GitHub não está habilitado na configuração")
+		err := fmt.Errorf("GitHub não está habilitado na configuração")
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, err.Error(), "Verificação de Configuração GitOps")
+		}
+		return nil, err
 	}
 
 	if !e.config.GitOps.Enabled {
-		return nil, fmt.Errorf("GitOps não está habilitado na configuração")
+		err := fmt.Errorf("GitOps não está habilitado na configuração")
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, err.Error(), "Verificação de Configuração GitOps")
+		}
+		return nil, err
 	}
 
 	if err := e.githubClient.ValidateToken(ctx); err != nil {
-		return nil, fmt.Errorf("falha na validação do token GitHub: %w", err)
+		tokenErr := fmt.Errorf("falha na validação do token GitHub: %w", err)
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, tokenErr.Error(), "Validação de Token GitHub")
+		}
+		return nil, tokenErr
 	}
 
 	enabledRepos := e.getEnabledRepositories()
 	if len(enabledRepos) == 0 {
-		return nil, fmt.Errorf("nenhum repositório GitHub habilitado encontrado")
+		err := fmt.Errorf("nenhum repositório GitHub habilitado encontrado")
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, err.Error(), "Seleção de Repositórios")
+		}
+		return nil, err
+	}
+
+	if e.discordWebhook != nil {
+		err := e.sendGitOpsStart(ctx, len(publicImages), enabledRepos, e.config.Settings.DryRun)
+		if err != nil {
+			e.logger.Warn("discord_webhook_failed").Err(err).Send()
+		}
 	}
 
 	if e.config.GitOps.TagResolution.Enabled {
@@ -80,7 +114,11 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 
 	validatedImageMap, err := e.buildAndValidatePrivateImageMap(ctx, publicImages)
 	if err != nil {
-		return nil, fmt.Errorf("falha ao validar imagens nos registries privados: %w", err)
+		validationErr := fmt.Errorf("falha ao validar imagens nos registries privados: %w", err)
+		if e.discordWebhook != nil {
+			e.discordWebhook.SendError(ctx, validationErr.Error(), "Validação de Imagens")
+		}
+		return nil, validationErr
 	}
 
 	availableImages := e.filterValidatedImages(publicImages, validatedImageMap)
@@ -89,10 +127,19 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 			Str("message", "Nenhuma imagem pública validada foi encontrada nos registries privados").
 			Send()
 
-		return &types.GitOpsSummary{
+		summary := &types.GitOpsSummary{
 			TotalRepositories: len(enabledRepos),
 			ProcessingTime:    time.Since(startTime).String(),
-		}, nil
+		}
+
+		if e.discordWebhook != nil {
+			err := e.sendGitOpsComplete(ctx, summary, e.config.Settings.DryRun)
+			if err != nil {
+				e.logger.Warn("discord_webhook_failed").Err(err).Send()
+			}
+		}
+
+		return summary, nil
 	}
 
 	e.logger.Info("validated_images_for_gitops").
@@ -138,7 +185,186 @@ func (e *Engine) MigrateRepositories(ctx context.Context, publicImages []*types.
 		Str("processing_time", summary.ProcessingTime).
 		Send()
 
+	if e.discordWebhook != nil {
+		err := e.sendGitOpsComplete(ctx, summary, e.config.Settings.DryRun)
+		if err != nil {
+			e.logger.Warn("discord_webhook_failed").Err(err).Send()
+		}
+	}
+
 	return summary, nil
+}
+
+func (e *Engine) sendGitOpsStart(ctx context.Context, totalImages int, repositories []types.GitHubRepositoryConfig, dryRun bool) error {
+	operation := "🚀 GITOPS INICIADO"
+	color := 0x00ff00
+
+	if dryRun {
+		operation = "🧪 SIMULAÇÃO GITOPS INICIADA"
+		color = 0xffaa00
+	}
+
+	repositoryNames := make([]string, len(repositories))
+	for i, repo := range repositories {
+		repositoryNames[i] = fmt.Sprintf("%s (priority: %d)", repo.Name, repo.Priority)
+	}
+
+	embed := types.DiscordEmbed{
+		Title:       operation,
+		Description: "Iniciando processo GitOps para atualização de repositórios",
+		Color:       color,
+		Fields: []types.DiscordEmbedField{
+			{
+				Name:   "📦 Imagens Validadas",
+				Value:  fmt.Sprintf("%d imagens para processar", totalImages),
+				Inline: true,
+			},
+			{
+				Name:   "📚 Repositórios",
+				Value:  fmt.Sprintf("%d repositórios habilitados", len(repositories)),
+				Inline: true,
+			},
+			{
+				Name:   "🎯 Repositórios Alvo",
+				Value:  "```\n" + strings.Join(repositoryNames, "\n") + "\n```",
+				Inline: false,
+			},
+			{
+				Name:   "⚙️ Modo",
+				Value:  getModeText(dryRun),
+				Inline: true,
+			},
+		},
+		Footer: &types.DiscordEmbedFooter{
+			Text: "Privateer GitOps Engine",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	message := types.DiscordMessage{
+		Username:  e.discordWebhook.GetName(),
+		AvatarURL: e.discordWebhook.GetAvatar(),
+		Embeds:    []types.DiscordEmbed{embed},
+	}
+
+	return e.discordWebhook.SendMessage(ctx, message)
+}
+
+func (e *Engine) sendGitOpsComplete(ctx context.Context, summary *types.GitOpsSummary, dryRun bool) error {
+	operation := "✅ GITOPS CONCLUÍDO"
+	color := 0x00ff00
+
+	if dryRun {
+		operation = "✅ SIMULAÇÃO GITOPS CONCLUÍDA"
+		color = 0x0099ff
+	}
+
+	if summary.FailedOperations > 0 {
+		operation = "⚠️ GITOPS COM FALHAS"
+		color = 0xff6600
+	}
+
+	description := fmt.Sprintf("Processo finalizado em %s", summary.ProcessingTime)
+
+	fields := []types.DiscordEmbedField{
+		{
+			Name: "📊 Resultados",
+			Value: fmt.Sprintf("**Repositórios:** %d\n**✅ PRs Criados:** %d\n**📝 Arquivos Alterados:** %d\n**🔄 Imagens Substituídas:** %d\n**❌ Falhas:** %d",
+				summary.ProcessedRepositories, summary.SuccessfulPRs, summary.TotalFilesChanged, summary.TotalImagesReplaced, summary.FailedOperations),
+			Inline: true,
+		},
+	}
+
+	successExamples := e.getSuccessfulRepos(summary.Results, 3)
+	if len(successExamples) > 0 {
+		fields = append(fields, types.DiscordEmbedField{
+			Name:   "🎯 Repositórios Processados",
+			Value:  "```\n" + successExamples + "\n```",
+			Inline: false,
+		})
+	}
+
+	failureExamples := e.getFailedRepos(summary.Results, 3)
+	if len(failureExamples) > 0 {
+		fields = append(fields, types.DiscordEmbedField{
+			Name:   "❌ Falhas",
+			Value:  "```\n" + failureExamples + "\n```",
+			Inline: false,
+		})
+	}
+
+	embed := types.DiscordEmbed{
+		Title:       operation,
+		Description: description,
+		Color:       color,
+		Fields:      fields,
+		Footer: &types.DiscordEmbedFooter{
+			Text: "Privateer GitOps Engine",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	message := types.DiscordMessage{
+		Username:  e.discordWebhook.GetName(),
+		AvatarURL: e.discordWebhook.GetAvatar(),
+		Embeds:    []types.DiscordEmbed{embed},
+	}
+
+	return e.discordWebhook.SendMessage(ctx, message)
+}
+
+func (e *Engine) getSuccessfulRepos(results []*types.GitOpsResult, limit int) string {
+	var examples []string
+	count := 0
+
+	for _, result := range results {
+		if result.Success && count < limit {
+			prInfo := "sem PR"
+			if result.PullRequest != nil {
+				prInfo = fmt.Sprintf("PR #%d", result.PullRequest.Number)
+			}
+			examples = append(examples, fmt.Sprintf("%s (%s) - %d arquivos alterados",
+				truncateString(result.Repository, 25),
+				prInfo,
+				len(result.FilesChanged)))
+			count++
+		}
+	}
+
+	if len(examples) == 0 {
+		return ""
+	}
+
+	result := strings.Join(examples, "\n")
+	if count < len(results) {
+		result += fmt.Sprintf("\n... e mais %d repositórios", len(results)-count)
+	}
+
+	return result
+}
+
+func (e *Engine) getFailedRepos(results []*types.GitOpsResult, limit int) string {
+	var examples []string
+	count := 0
+
+	for _, result := range results {
+		if !result.Success && count < limit {
+			errorMsg := "erro desconhecido"
+			if result.Error != nil {
+				errorMsg = result.Error.Error()
+			}
+			examples = append(examples, fmt.Sprintf("%s: %s",
+				truncateString(result.Repository, 20),
+				truncateString(errorMsg, 35)))
+			count++
+		}
+	}
+
+	if len(examples) == 0 {
+		return ""
+	}
+
+	return strings.Join(examples, "\n")
 }
 
 func (e *Engine) buildAndValidatePrivateImageMap(ctx context.Context, publicImages []*types.ImageInfo) (map[string]string, error) {
@@ -690,4 +916,25 @@ func (e *Engine) parseRepositoryName(repoName string) (owner, repo string, err e
 		return "", "", fmt.Errorf("formato de repositório inválido: %s", repoName)
 	}
 	return parts[0], parts[1], nil
+}
+
+func getModeText(dryRun bool) string {
+	if dryRun {
+		return "🧪 Simulação (Dry Run)"
+	}
+	return "🚀 Produção (Real)"
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func maskWebhookURL(url string) string {
+	if len(url) < 20 {
+		return "***"
+	}
+	return url[:20] + "***"
 }
