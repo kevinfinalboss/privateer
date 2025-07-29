@@ -86,6 +86,18 @@ func (d *DiscordWebhook) SendMigrationStart(ctx context.Context, totalImages int
 	return d.send(ctx, message)
 }
 
+func (d *DiscordWebhook) SendMessage(ctx context.Context, message types.DiscordMessage) error {
+	return d.send(ctx, message)
+}
+
+func (d *DiscordWebhook) GetName() string {
+	return d.name
+}
+
+func (d *DiscordWebhook) GetAvatar() string {
+	return d.avatar
+}
+
 func (d *DiscordWebhook) SendMigrationComplete(ctx context.Context, summary *types.MigrationSummary, dryRun bool) error {
 	operation := "✅ MIGRAÇÃO CONCLUÍDA"
 	color := 0x00ff00
