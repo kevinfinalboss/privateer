@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kevinfinalboss/privateer/pkg/types"
 )
 
 func IsPublicRegistry(registry string) bool {
@@ -69,8 +71,11 @@ func BuildFullImageName(registry, repository, tag string) string {
 
 func BuildDockerIOImageName(repository, tag string) string {
 	if !strings.Contains(repository, "/") {
-
 		return fmt.Sprintf("docker.io/library/%s:%s", repository, tag)
 	}
 	return fmt.Sprintf("docker.io/%s:%s", repository, tag)
+}
+
+func ParseImageName(imageName string) *types.ParsedImage {
+	return types.ParseImageName(imageName)
 }
