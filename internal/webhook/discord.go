@@ -21,33 +21,6 @@ type DiscordWebhook struct {
 	client *http.Client
 }
 
-type DiscordMessage struct {
-	Username  string         `json:"username,omitempty"`
-	AvatarURL string         `json:"avatar_url,omitempty"`
-	Content   string         `json:"content,omitempty"`
-	Embeds    []DiscordEmbed `json:"embeds,omitempty"`
-}
-
-type DiscordEmbed struct {
-	Title       string              `json:"title,omitempty"`
-	Description string              `json:"description,omitempty"`
-	Color       int                 `json:"color,omitempty"`
-	Fields      []DiscordEmbedField `json:"fields,omitempty"`
-	Footer      *DiscordEmbedFooter `json:"footer,omitempty"`
-	Timestamp   string              `json:"timestamp,omitempty"`
-}
-
-type DiscordEmbedField struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Inline bool   `json:"inline,omitempty"`
-}
-
-type DiscordEmbedFooter struct {
-	Text    string `json:"text"`
-	IconURL string `json:"icon_url,omitempty"`
-}
-
 func NewDiscordWebhook(config types.DiscordWebhookConfig, logger *logger.Logger) *DiscordWebhook {
 	name := config.Name
 	if name == "" {
@@ -56,7 +29,7 @@ func NewDiscordWebhook(config types.DiscordWebhookConfig, logger *logger.Logger)
 
 	avatar := config.Avatar
 	if avatar == "" {
-		avatar = "https://raw.githubusercontent.com/kevinfinalboss/privateer/main/.github/images/privateer-logo.png"
+		avatar = "https://raw.githubusercontent.com/kevinfinalboss/privateer/refs/heads/master/.github/images/privateer-logo.png"
 	}
 
 	return &DiscordWebhook{
@@ -77,11 +50,11 @@ func (d *DiscordWebhook) SendMigrationStart(ctx context.Context, totalImages int
 		color = 0xffaa00
 	}
 
-	embed := DiscordEmbed{
+	embed := types.DiscordEmbed{
 		Title:       operation,
 		Description: "Iniciando migração de imagens Docker",
 		Color:       color,
-		Fields: []DiscordEmbedField{
+		Fields: []types.DiscordEmbedField{
 			{
 				Name:   "📦 Imagens",
 				Value:  fmt.Sprintf("%d imagens públicas encontradas", totalImages),
@@ -98,16 +71,16 @@ func (d *DiscordWebhook) SendMigrationStart(ctx context.Context, totalImages int
 				Inline: true,
 			},
 		},
-		Footer: &DiscordEmbedFooter{
+		Footer: &types.DiscordEmbedFooter{
 			Text: "Privateer Migration Engine",
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	message := DiscordMessage{
+	message := types.DiscordMessage{
 		Username:  d.name,
 		AvatarURL: d.avatar,
-		Embeds:    []DiscordEmbed{embed},
+		Embeds:    []types.DiscordEmbed{embed},
 	}
 
 	return d.send(ctx, message)
@@ -135,7 +108,7 @@ func (d *DiscordWebhook) SendMigrationComplete(ctx context.Context, summary *typ
 		description += fmt.Sprintf(" (%d ignoradas)", summary.SkippedCount)
 	}
 
-	fields := []DiscordEmbedField{
+	fields := []types.DiscordEmbedField{
 		{
 			Name: "📊 Resultados",
 			Value: fmt.Sprintf("**Total:** %d\n**✅ Sucessos:** %d\n**❌ Falhas:** %d\n**⏭️ Ignoradas:** %d",
@@ -146,7 +119,7 @@ func (d *DiscordWebhook) SendMigrationComplete(ctx context.Context, summary *typ
 
 	successExamples := d.getSuccessExamples(summary.Results, 3)
 	if len(successExamples) > 0 {
-		fields = append(fields, DiscordEmbedField{
+		fields = append(fields, types.DiscordEmbedField{
 			Name:   "🎯 Migrações Realizadas",
 			Value:  "```\n" + successExamples + "\n```",
 			Inline: false,
@@ -155,61 +128,61 @@ func (d *DiscordWebhook) SendMigrationComplete(ctx context.Context, summary *typ
 
 	failureExamples := d.getFailureExamples(summary.Results, 3)
 	if len(failureExamples) > 0 {
-		fields = append(fields, DiscordEmbedField{
+		fields = append(fields, types.DiscordEmbedField{
 			Name:   "❌ Falhas",
 			Value:  "```\n" + failureExamples + "\n```",
 			Inline: false,
 		})
 	}
 
-	embed := DiscordEmbed{
+	embed := types.DiscordEmbed{
 		Title:       operation,
 		Description: description,
 		Color:       color,
 		Fields:      fields,
-		Footer: &DiscordEmbedFooter{
+		Footer: &types.DiscordEmbedFooter{
 			Text: "Privateer Migration Engine",
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	message := DiscordMessage{
+	message := types.DiscordMessage{
 		Username:  d.name,
 		AvatarURL: d.avatar,
-		Embeds:    []DiscordEmbed{embed},
+		Embeds:    []types.DiscordEmbed{embed},
 	}
 
 	return d.send(ctx, message)
 }
 
 func (d *DiscordWebhook) SendError(ctx context.Context, errorMsg string, operation string) error {
-	embed := DiscordEmbed{
+	embed := types.DiscordEmbed{
 		Title:       "❌ ERRO NA MIGRAÇÃO",
 		Description: fmt.Sprintf("Falha durante: %s", operation),
 		Color:       0xff0000,
-		Fields: []DiscordEmbedField{
+		Fields: []types.DiscordEmbedField{
 			{
 				Name:   "💥 Erro",
 				Value:  "```\n" + errorMsg + "\n```",
 				Inline: false,
 			},
 		},
-		Footer: &DiscordEmbedFooter{
+		Footer: &types.DiscordEmbedFooter{
 			Text: "Privateer Migration Engine",
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	message := DiscordMessage{
+	message := types.DiscordMessage{
 		Username:  d.name,
 		AvatarURL: d.avatar,
-		Embeds:    []DiscordEmbed{embed},
+		Embeds:    []types.DiscordEmbed{embed},
 	}
 
 	return d.send(ctx, message)
 }
 
-func (d *DiscordWebhook) send(ctx context.Context, message DiscordMessage) error {
+func (d *DiscordWebhook) send(ctx context.Context, message types.DiscordMessage) error {
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("falha ao serializar mensagem Discord: %w", err)
