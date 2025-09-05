@@ -567,6 +567,39 @@ func (s *Scanner) isPrivateRegistry(imageName string) bool {
 				Bool("is_private", true).
 				Send()
 			return true
+		} else {
+			s.logger.Debug("private_registry_detection").
+				Str("image", imageName).
+				Str("type", "ghcr_insufficient_parts").
+				Int("parts_count", len(parts)).
+				Bool("is_private", false).
+				Send()
+			return false
+		}
+	}
+
+	knownPublicRegistries := []string{
+		"docker.io",
+		"index.docker.io",
+		"registry-1.docker.io",
+		"quay.io",
+		"registry.k8s.io",
+		"k8s.gcr.io",
+		"gcr.io/google-containers",
+		"mcr.microsoft.com",
+		"public.ecr.aws",
+	}
+
+	for _, publicReg := range knownPublicRegistries {
+		if strings.HasPrefix(imageLower, publicReg) ||
+			strings.Contains(imageLower, publicReg) {
+			s.logger.Debug("private_registry_detection").
+				Str("image", imageName).
+				Str("type", "known_public_registry").
+				Str("matched_registry", publicReg).
+				Bool("is_private", false).
+				Send()
+			return false
 		}
 	}
 
@@ -575,6 +608,20 @@ func (s *Scanner) isPrivateRegistry(imageName string) bool {
 		!strings.Contains(parts[0], "docker.io") &&
 		!strings.Contains(parts[0], "index.docker.io") &&
 		!strings.Contains(parts[0], "registry-1.docker.io") {
+
+		firstPart := strings.ToLower(parts[0])
+		for _, publicReg := range knownPublicRegistries {
+			if strings.Contains(firstPart, strings.ToLower(publicReg)) {
+				s.logger.Debug("private_registry_detection").
+					Str("image", imageName).
+					Str("type", "public_registry_in_custom_domain_check").
+					Str("detected_public", publicReg).
+					Bool("is_private", false).
+					Send()
+				return false
+			}
+		}
+
 		s.logger.Debug("private_registry_detection").
 			Str("image", imageName).
 			Str("type", "custom_domain_private").
